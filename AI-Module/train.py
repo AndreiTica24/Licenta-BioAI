@@ -9,7 +9,7 @@ from dataset import GenomicDataset
 
 def train_model():
     # 1. Configurarea dispozitivului (Să ne asigurăm că folosește RTX-ul)
-    device = torch.device("cpu")
+    device = torch.device("cuda" ) #if torch.cuda.is_available() else "cpu"
     print(f"🚀 Pornim antrenamentul pe: {device}")
 
     # 2. Căile către date
