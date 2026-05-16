@@ -1,0 +1,10 @@
+data/
+*.bam
+*.vcf
+*.bai
+*.bed
+*.pkl
+checkpoints/
+__pycache__/
+*.pyc
+train.log
