@@ -152,9 +152,11 @@ class VariantCallerCNN(nn.Module):
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        x: (B, 6, H, W)
+        x: (B, 6, H, W)  — H=W=100 implicit
         returns: logits (B, 3)
         """
+        assert x.ndim == 4 and x.shape[1] == 6, \
+            f"Input așteptat (B,6,H,W), primit {tuple(x.shape)}"
         x = self.stem(x)
         x = self.stage1(x)
         x = self.stage2(x)

@@ -13,6 +13,9 @@ Fiecare exemplu = o imagine pileup RGB (6 canale) de dimensiune (6, H, W):
 Label: 0=Ref, 1=Het, 2=Hom-Alt
 """
 
+import os
+import pickle
+import hashlib
 import random
 import logging
 from pathlib import Path
@@ -222,9 +225,50 @@ class GenomicDataset(Dataset):
         self._build_index()
 
     # ------------------------------------------------------------------
+    def _cache_path(self) -> str:
+        """
+        Generează o cale unică pentru fișierul cache bazată pe:
+        vcf_path + bed_path + max_samples + seed
+        → astfel, dacă schimbi oricare parametru, cache-ul vechi e ignorat automat.
+        """
+        key = f"{self.vcf_path}|{self.bed_path}|{self.max_samples}|{self.seed}"
+        key_hash = hashlib.md5(key.encode()).hexdigest()[:10]
+        vcf_stem  = os.path.splitext(os.path.basename(self.vcf_path))[0]
+        cache_dir = os.path.join(os.path.dirname(self.vcf_path), ".cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, f"{vcf_stem}_{key_hash}.pkl")
+
+    # ------------------------------------------------------------------
     def _build_index(self):
-        """Parsează VCF-ul și construiește lista de poziții + labels."""
-        logger.info(f"[GenomicDataset] Indexăm VCF: {self.vcf_path}")
+        """
+        Parsează VCF-ul și construiește lista de poziții + labels.
+        La prima rulare: parsează și salvează cache pe disc.
+        La rulările ulterioare: încarcă direct din cache (instant).
+        """
+        from collections import Counter
+
+        cache_path = self._cache_path()
+
+        # ----------------------------------------------------------------
+        # CACHE HIT — încărcare instantă
+        # ----------------------------------------------------------------
+        if os.path.exists(cache_path):
+            logger.info(f"[GenomicDataset] 🚀 Cache găsit: {cache_path}")
+            print(f"   ⚡ Cache găsit! Încărcare rapidă din: {os.path.basename(cache_path)}")
+            with open(cache_path, "rb") as f:
+                self.data_points = pickle.load(f)
+            counts = Counter(p["label"] for p in self.data_points)
+            print(
+                f"   ✅ {len(self.data_points)} exemple din cache | "
+                f"Ref={counts[0]} | Het={counts[1]} | Hom={counts[2]}"
+            )
+            return
+
+        # ----------------------------------------------------------------
+        # CACHE MISS — parsare completă (prima rulare)
+        # ----------------------------------------------------------------
+        logger.info(f"[GenomicDataset] Prima rulare — indexăm VCF: {self.vcf_path}")
+        print(f"   🔍 Prima rulare: parsăm VCF (durează câteva minute)...")
 
         bed = None
         if self.bed_path and Path(self.bed_path).exists():
@@ -267,7 +311,6 @@ class GenomicDataset(Dataset):
         vcf.close()
 
         # Adăugăm exemple Ref (homozigot referință) dacă avem BED
-        # (simplu: luăm poziții aleatorii din BED care nu sunt în VCF)
         if bed is not None:
             variant_positions = {(p["chrom"], p["pos"]) for p in points}
             rng = random.Random(self.seed)
@@ -281,7 +324,6 @@ class GenomicDataset(Dataset):
                 for start, end in intervals:
                     if ref_added >= ref_budget:
                         break
-                    # Câteva poziții aleatorii per interval
                     sample_n = min(5, end - start)
                     for pos in rng.sample(range(start, end), k=sample_n):
                         if (chrom, pos) not in variant_positions:
@@ -305,8 +347,15 @@ class GenomicDataset(Dataset):
 
         self.data_points = points
 
+        # ----------------------------------------------------------------
+        # Salvăm cache pe disc pentru rulările viitoare
+        # ----------------------------------------------------------------
+        logger.info(f"[GenomicDataset] 💾 Salvăm cache: {cache_path}")
+        print(f"   💾 Salvăm cache pentru viitor: {os.path.basename(cache_path)}")
+        with open(cache_path, "wb") as f:
+            pickle.dump(self.data_points, f)
+
         # Statistici
-        from collections import Counter
         counts = Counter(p["label"] for p in self.data_points)
         logger.info(
             f"[GenomicDataset] Total: {len(self.data_points)} exemple | "
