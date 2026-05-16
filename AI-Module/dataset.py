@@ -40,11 +40,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constante encoding
 # ---------------------------------------------------------------------------
-PILEUP_HEIGHT  = 6    # număr canale / features per poziție
-PILEUP_WIDTH   = 100  # fereastră ± 50 bp în jurul variantei
-MAX_DEPTH      = 200  # depth de saturație pentru normalizare
+PILEUP_WIDTH   = 100   # fereastră ± 50 bp în jurul variantei
+PILEUP_HEIGHT  = 100   # număr de read-uri afișate (rânduri imagine)
+N_CHANNELS     = 6     # canale per pixel
+MAX_DEPTH      = 200   # depth de saturație
 MAX_BASE_QUAL  = 40
 MAX_MAP_QUAL   = 60
+
+# Codificare nucleotide → valoare [0,1]
+BASE_ENC = {'A': 0.25, 'C': 0.50, 'G': 0.75, 'T': 1.00,
+            'N': 0.00, '-': 0.00, '*': 0.00}
 
 
 # ---------------------------------------------------------------------------
@@ -94,97 +99,143 @@ def _genotype_to_label(gt: Tuple[int, ...]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Encoding pileup
+# Encoding pileup — reprezentare read-level 2D (corectă)
 # ---------------------------------------------------------------------------
 
-def _encode_pileup(bam: pysam.AlignmentFile,
-                   chrom: str, pos: int) -> np.ndarray:
-    """
-    Extrage o fereastră de PILEUP_WIDTH bp centrată pe `pos`
-    și returnează un tensor (PILEUP_HEIGHT, PILEUP_WIDTH).
-    """
-    half  = PILEUP_WIDTH // 2
-    start = max(0, pos - half)
-    end   = pos + half
+def _get_read_base(read: pysam.PileupRead, col_pos: int) -> str:
+    """Returnează baza unui read la o poziție de referință dată."""
+    if read.is_del or read.is_refskip:
+        return '-'
+    try:
+        seq = read.alignment.query_sequence
+        if seq is None:
+            return 'N'
+        return seq[read.query_position].upper()
+    except (IndexError, TypeError):
+        return 'N'
 
-    # Acumulatoare per coloană
-    depth     = np.zeros(PILEUP_WIDTH, dtype=np.float32)
-    alt_count = np.zeros(PILEUP_WIDTH, dtype=np.float32)
-    base_qual = np.zeros(PILEUP_WIDTH, dtype=np.float32)
-    map_qual  = np.zeros(PILEUP_WIDTH, dtype=np.float32)
-    fwd_count = np.zeros(PILEUP_WIDTH, dtype=np.float32)
-    del_count = np.zeros(PILEUP_WIDTH, dtype=np.float32)
+
+def _encode_pileup_2d(bam: pysam.AlignmentFile,
+                      chrom: str,
+                      pos: int,
+                      ref_base: str = 'N',
+                      height: int = PILEUP_HEIGHT,
+                      width:  int = PILEUP_WIDTH) -> np.ndarray:
+    """
+    Construiește o imagine pileup read-level de formă (N_CHANNELS, height, width).
+
+    Fiecare rând = un read diferit; fiecare coloană = o poziție genomică.
+    Dacă sunt mai puțin de `height` read-uri, rândurile rămase sunt zero.
+
+    Canale per pixel (x=read, y=coloană):
+      0: baza nucleotidică encodată  [0,1]
+      1: este baza alternativă?      {0,1}  ← SEMNALUL CHEIE pentru AF
+      2: calitate bază               [0,1]
+      3: calitate mapping            [0,1]
+      4: direcție strand             {0=rev, 1=fwd}
+      5: este deletion?              {0,1}
+    """
+    half  = width // 2
+    start = max(0, pos - half)
+    end   = start + width
+
+    # img[canal, read_idx, col_idx]
+    img = np.zeros((N_CHANNELS, height, width), dtype=np.float32)
+
+    ref_base_upper = ref_base.upper() if ref_base else 'N'
+
+    # --- Normalizare contig: BAM poate folosi '1' în loc de 'chr1' ---
+    bam_refs = set(bam.references)
+    if chrom not in bam_refs:
+        alt = chrom[3:] if chrom.startswith("chr") else "chr" + chrom
+        if alt in bam_refs:
+            chrom = alt
 
     try:
+        # Colectăm toate pileup-urile o singură dată per coloană
+        # Structura: col_reads[col_idx] = list of PileupRead
+        col_reads: Dict[int, list] = {}
+
         for col in bam.pileup(chrom, start, end,
                                truncate=True,
                                min_base_quality=0,
-                               stepper="all"):
+                               min_mapping_quality=0,
+                               stepper="all",
+                               ignore_overlaps=False):
             col_pos = col.reference_pos
             if col_pos < start or col_pos >= end:
                 continue
             idx = col_pos - start
-            if idx < 0 or idx >= PILEUP_WIDTH:
+            col_reads[idx] = list(col.pileups)
+
+        # Construim o listă ordonată de read-uri la poziția centrală
+        center_idx = pos - start
+        center_idx = max(0, min(center_idx, width - 1))
+
+        center_reads = col_reads.get(center_idx, [])
+
+        # Sortăm: mai întâi read-urile cu baza alternativă (maximizăm
+        # informația vizibilă în primele rânduri ale imaginii)
+        def sort_key(r):
+            base = _get_read_base(r, pos)
+            is_alt = int(base != ref_base_upper and base not in ('N', '-'))
+            return (-is_alt, r.alignment.query_name or "")
+
+        center_reads_sorted = sorted(center_reads, key=sort_key)
+
+        # Construim un index read_name → rând
+        read_to_row: Dict[str, int] = {}
+        for row_idx, pread in enumerate(center_reads_sorted[:height]):
+            name = pread.alignment.query_name or str(row_idx)
+            read_to_row[name] = row_idx
+
+        # Umplem imaginea coloană cu coloană
+        for col_idx, reads in col_reads.items():
+            if col_idx < 0 or col_idx >= width:
                 continue
+            for pread in reads:
+                name = pread.alignment.query_name or ""
+                row_idx = read_to_row.get(name)
+                if row_idx is None:
+                    continue  # read-ul nu apare la poziția centrală
 
-            reads = list(col.pileups)
-            if not reads:
-                continue
+                base = _get_read_base(pread, start + col_idx)
 
-            d = len(reads)
-            depth[idx] = d
+                # Canal 0: nucleotidă
+                img[0, row_idx, col_idx] = BASE_ENC.get(base, 0.0)
 
-            bq_sum = mq_sum = fwd = dels = alt = 0
-            ref_base = None  # nu avem referință, folosim baza majoritară
+                # Canal 1: este baza alternativă? (semnalul cheie AF)
+                is_alt = int(
+                    base != ref_base_upper
+                    and base not in ('N', '-', '*')
+                    and not pread.is_del
+                    and not pread.is_refskip
+                )
+                img[1, row_idx, col_idx] = float(is_alt)
 
-            for r in reads:
-                if r.is_del or r.is_refskip:
-                    dels += 1
-                    continue
-                bq_sum += r.alignment.query_qualities[r.query_position] \
-                    if r.alignment.query_qualities is not None else 20
-                mq_sum += r.alignment.mapping_quality
-                if not r.alignment.is_reverse:
-                    fwd += 1
+                # Canal 2: calitate bază
+                if not pread.is_del and not pread.is_refskip:
+                    try:
+                        quals = pread.alignment.query_qualities
+                        bq = quals[pread.query_position] if quals is not None else 20
+                    except (IndexError, TypeError):
+                        bq = 20
+                    img[2, row_idx, col_idx] = min(bq, MAX_BASE_QUAL) / MAX_BASE_QUAL
 
-            base_qual[idx] = bq_sum / max(d, 1)
-            map_qual[idx]  = mq_sum / max(d, 1)
-            fwd_count[idx] = fwd / max(d, 1)
-            del_count[idx] = dels / max(d, 1)
+                # Canal 3: calitate mapping
+                mq = pread.alignment.mapping_quality or 0
+                img[3, row_idx, col_idx] = min(mq, MAX_MAP_QUAL) / MAX_MAP_QUAL
 
-    except (ValueError, KeyError):
-        pass  # contig lipsă sau interval invalid
+                # Canal 4: strand (1=forward, 0=reverse)
+                img[4, row_idx, col_idx] = float(not pread.alignment.is_reverse)
 
-    # Calculăm AF la poziția centrală (pos)
-    center = pos - start
-    if 0 <= center < PILEUP_WIDTH and depth[center] > 0:
-        # AF estimat din counts (simplificat: nu avem referința exactă)
-        alt_count[center] = 1.0 - fwd_count[center]  # placeholder
+                # Canal 5: deletion
+                img[5, row_idx, col_idx] = float(pread.is_del)
 
-    # Normalizare
-    img = np.stack([
-        alt_count,                                     # canal 0: AF
-        np.clip(depth, 0, MAX_DEPTH) / MAX_DEPTH,     # canal 1: depth
-        np.clip(base_qual, 0, MAX_BASE_QUAL) / MAX_BASE_QUAL,  # canal 2
-        np.clip(map_qual,  0, MAX_MAP_QUAL)  / MAX_MAP_QUAL,   # canal 3
-        fwd_count,                                     # canal 4: strand bias
-        del_count,                                     # canal 5: del ratio
-    ], axis=0).astype(np.float32)
+    except (ValueError, KeyError, AssertionError):
+        pass  # contig lipsă sau interval invalid — returnăm zeros
 
-    return img  # shape: (6, PILEUP_WIDTH)
-
-
-def _encode_pileup_2d(bam: pysam.AlignmentFile,
-                      chrom: str, pos: int,
-                      height: int = 100) -> np.ndarray:
-    """
-    Versiune 2D: (6, height, PILEUP_WIDTH) — fiecare canal e replicat
-    pe dimensiunea height pentru compatibilitate CNN 2D.
-    Poți înlocui cu read-level pileup pentru mai multă informație.
-    """
-    img_1d = _encode_pileup(bam, chrom, pos)           # (6, W)
-    img_2d = np.repeat(img_1d[:, np.newaxis, :], height, axis=1)  # (6, H, W)
-    return img_2d
+    return img  # (N_CHANNELS, height, width) = (6, 100, 100)
 
 
 # ---------------------------------------------------------------------------
@@ -270,19 +321,36 @@ class GenomicDataset(Dataset):
         logger.info(f"[GenomicDataset] Prima rulare — indexăm VCF: {self.vcf_path}")
         print(f"   🔍 Prima rulare: parsăm VCF (durează câteva minute)...")
 
+        # Detectăm formatul contigurilor din BAM PRIMA dată — înainte de BED și VCF
+        _bam_tmp = pysam.AlignmentFile(self.bam_path, "rb")
+        bam_refs = set(_bam_tmp.references)
+        bam_has_chr = any(r.startswith("chr") for r in bam_refs)
+        _bam_tmp.close()
+
         bed = None
         if self.bed_path and Path(self.bed_path).exists():
             logger.info(f"[GenomicDataset] Încărcăm BED: {self.bed_path}")
-            bed = _load_bed_regions(self.bed_path)
+            raw_bed = _load_bed_regions(self.bed_path)
+            # Normalizăm cheile BED la același format ca BAM-ul
+            bed = {}
+            for c, intervals in raw_bed.items():
+                if bam_has_chr and not c.startswith("chr"):
+                    c = "chr" + c
+                elif not bam_has_chr and c.startswith("chr"):
+                    c = c[3:]
+                bed[c] = intervals
 
         vcf = cyvcf2.VCF(self.vcf_path)
         points = []
 
         for variant in vcf:
             chrom = variant.CHROM
-            # Normalizare prefix chr
-            if not chrom.startswith("chr"):
+
+            # Normalizăm prefixul chr să se potrivească cu BAM-ul
+            if bam_has_chr and not chrom.startswith("chr"):
                 chrom = "chr" + chrom
+            elif not bam_has_chr and chrom.startswith("chr"):
+                chrom = chrom[3:]
 
             pos = variant.POS - 1  # 0-indexed
 
@@ -310,15 +378,22 @@ class GenomicDataset(Dataset):
 
         vcf.close()
 
-        # Adăugăm exemple Ref (homozigot referință) dacă avem BED
+        # Adăugăm exemple Ref (homozigot referință) din BED
         if bed is not None:
             variant_positions = {(p["chrom"], p["pos"]) for p in points}
             rng = random.Random(self.seed)
 
-            ref_budget = len(points) // 2  # echilibrare parțială
+            ref_budget = len(points) // 2
             ref_added  = 0
 
-            for chrom, intervals in bed.items():
+            for bed_chrom, intervals in bed.items():
+                # Normalizăm și cromozomul din BED
+                chrom = bed_chrom
+                if bam_has_chr and not chrom.startswith("chr"):
+                    chrom = "chr" + chrom
+                elif not bam_has_chr and chrom.startswith("chr"):
+                    chrom = chrom[3:]
+
                 if ref_added >= ref_budget:
                     break
                 for start, end in intervals:
@@ -332,7 +407,7 @@ class GenomicDataset(Dataset):
                                 "pos":   pos,
                                 "ref":   "N",
                                 "alt":   ".",
-                                "label": 0,  # Ref
+                                "label": 0,
                             })
                             ref_added += 1
                             if ref_added >= ref_budget:
@@ -374,13 +449,19 @@ class GenomicDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         dp = self.data_points[idx]
 
-        # Deschidem BAM-ul per worker (thread-safe)
+        # Deschidem BAM-ul per worker (thread-safe — fiecare worker
+        # are propria instanță AlignmentFile)
         bam = pysam.AlignmentFile(self.bam_path, "rb")
         img = _encode_pileup_2d(
-            bam, dp["chrom"], dp["pos"], height=self.img_height
+            bam,
+            chrom    = dp["chrom"],
+            pos      = dp["pos"],
+            ref_base = dp.get("ref", "N"),   # ← transmitem baza de referință
+            height   = self.img_height,
+            width    = PILEUP_WIDTH,
         )
         bam.close()
 
-        tensor = torch.from_numpy(img)          # (6, H, W)
+        tensor = torch.from_numpy(img)                       # (6, H, W)
         label  = torch.tensor(dp["label"], dtype=torch.long)
         return tensor, label
