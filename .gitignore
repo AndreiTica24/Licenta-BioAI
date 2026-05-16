@@ -8,3 +8,8 @@ checkpoints/
 __pycache__/
 *.pyc
 train.log
+.gitattributes
+/AI-Module/__pycache__
+AI-Module/__pycache__/dataset.cpython-310.pyc
+AI-Module/__pycache__/model.cpython-310.pyc
+.gitattributes
