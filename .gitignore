@@ -13,3 +13,9 @@ train.log
 AI-Module/__pycache__/dataset.cpython-310.pyc
 AI-Module/__pycache__/model.cpython-310.pyc
 .gitattributes
+AI-Module/dataset_simple.py
+AI-Module/evaluate.py
+AI-Module/inspect_images.py
+AI-Module/model_simple.py
+AI-Module/train_simple.log
+AI-Module/train_simple.py

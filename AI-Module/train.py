@@ -15,7 +15,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-import numpy as np 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -46,13 +46,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 DEFAULT_CONFIG = {
     # --- Date ---
-    "bam_train": "data/HG002_Son/151002_7001448_0359_AC7F6GANXX_Sample_HG002-EEogPU_v02-KIT-Av5_AGATGTAC_L008.posiSrt.markDup.bam",
-    "vcf_train": "data/HG002_Son/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf",
-    "bed_train": "data/HG002_Son/HG002_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed",
+    "bam_train": "data/HG002_Son/HG002.hiseq4000.wes-agilent.50x.dedup.grch38.bam",
+    "vcf_train": "data/HG002_Son/HG002_exome.vcf",
+    "bed_train": None,   # Ref generat din offset față de variante
 
-    "bam_val":   "data/HG003_Father/151002_7001448_0359_AC7F6GANXX_Sample_HG003-EEogPU_v02-KIT-Av5_TCTTCACA_L008.posiSrt.markDup.bam",
-    "vcf_val":   "data/HG003_Father/HG003_GRCh38_1_22_v4.2.1_benchmark.vcf",
-    "bed_val":   "data/HG003_Father/HG003_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed",
+    "bam_val":   "data/HG003_Father/HG003.hiseq4000.wes-agilent.50x.dedup.grch38.bam",
+    "vcf_val":   "data/HG003_Father/HG003_exome.vcf",
+    "bed_val":   None,
 
     # --- Dimensiuni ---
     "max_samples_train": 50_000,
@@ -60,8 +60,8 @@ DEFAULT_CONFIG = {
 
     # --- Hiperparametri ---
     "batch_size":  32,
-    "epochs":      20,
-    "lr":          1e-4,
+    "epochs":      30,
+    "lr":          1e-3,
     "weight_decay": 1e-5,
     "num_workers": 4,
     "seed":        42,
@@ -173,10 +173,38 @@ def train_model(config: dict):
         seed        = config["seed"],
     )
 
+    # --------------------------------------------------------------------------
+    # 2. Model
+    # --------------------------------------------------------------------------
+    model = VariantCallerCNN().to(device)
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"\n🧠 Model: VariantCallerCNN — {total_params:,} parametri antrenabili")
+
+    # --------------------------------------------------------------------------
+    # 3. WeightedRandomSampler — fiecare batch are ~1/3 din fiecare clasă
+    # --------------------------------------------------------------------------
+    label_counts = defaultdict(int)
+    for dp in train_dataset.data_points:
+        label_counts[dp["label"]] += 1
+
+    # Greutate per exemplu = inversul frecvenței clasei sale
+    sample_weights = torch.tensor([
+        1.0 / max(label_counts[dp["label"]], 1)
+        for dp in train_dataset.data_points
+    ], dtype=torch.float32)
+
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights     = sample_weights,
+        num_samples = len(sample_weights),
+        replacement = True,
+    )
+    print(f"   Distribuție train: Ref={label_counts[0]} | Het={label_counts[1]} | Hom={label_counts[2]}")
+    print(f"   WeightedSampler activ — fiecare batch va fi ~echilibrat per clasă")
+
     train_loader = DataLoader(
         train_dataset,
         batch_size  = config["batch_size"],
-        shuffle     = True,
+        sampler     = sampler,          # înlocuiește shuffle=True
         num_workers = config["num_workers"],
         pin_memory  = device.type == "cuda",
         persistent_workers = config["num_workers"] > 0,
@@ -190,26 +218,10 @@ def train_model(config: dict):
         persistent_workers = config["num_workers"] > 0,
     )
 
-    # --------------------------------------------------------------------------
-    # 2. Model
-    # --------------------------------------------------------------------------
-    model = VariantCallerCNN().to(device)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\n🧠 Model: VariantCallerCNN — {total_params:,} parametri antrenabili")
-
-    # --------------------------------------------------------------------------
-    # 3. Ponderi clase pentru dezechilibru Ref >> Het >> Hom
-    # --------------------------------------------------------------------------
-    label_counts = defaultdict(int)
-    for dp in train_dataset.data_points:
-        label_counts[dp["label"]] += 1
-
     total = sum(label_counts.values())
-    weights = torch.tensor(
-        [total / (3 * max(label_counts[i], 1)) for i in range(3)],
-        dtype=torch.float32,
-    ).to(device)
-    print(f"⚖️  Ponderi clase: Ref={weights[0]:.3f} | Het={weights[1]:.3f} | Hom={weights[2]:.3f}")
+    # Ponderi mai agresive pe Het — clasa cea mai greu de învățat
+    weights = torch.tensor([1.0, 1.5, 1.0], dtype=torch.float32).to(device)
+    print(f"⚖️  Ponderi clase: Ref={weights[0]:.2f} | Het={weights[1]:.2f} | Hom={weights[2]:.2f}")
 
     criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=0.05)
     optimizer = optim.AdamW(
@@ -217,8 +229,15 @@ def train_model(config: dict):
         lr           = config["lr"],
         weight_decay = config["weight_decay"],
     )
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6
+    # OneCycleLR — warmup rapid + decay, mult mai bun pentru convergență
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr      = config["lr"],
+        epochs      = config["epochs"],
+        steps_per_epoch = len(train_loader),
+        pct_start   = 0.1,   # 10% warmup
+        div_factor  = 10,    # lr_start = max_lr/10
+        final_div_factor = 100,
     )
 
     # --------------------------------------------------------------------------
@@ -228,7 +247,7 @@ def train_model(config: dict):
     best_f1       = 0.0
     history       = {"train_loss": [], "val_loss": [], "f1": [], "lr": []}
     no_improve    = 0
-    PATIENCE      = 7  # early stopping
+    PATIENCE      = 10  # mai mult timp să iasă din platou
 
     print(f"\n⏳ Antrenament: {config['epochs']} epoci, "
           f"batch={config['batch_size']}, lr={config['lr']}\n")
@@ -249,6 +268,7 @@ def train_model(config: dict):
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            scheduler.step()   # OneCycleLR: pas per batch
             train_loss  += loss.item()
             train_steps += 1
 
@@ -263,7 +283,7 @@ def train_model(config: dict):
         avg_val_loss, f1, prec, rec, report, cm = evaluate(
             model, val_loader, criterion, device
         )
-        scheduler.step(avg_val_loss)
+        scheduler_step_done = True  # OneCycleLR se face per batch
 
         current_lr = optimizer.param_groups[0]["lr"]
         elapsed    = time.time() - epoch_start
@@ -288,8 +308,8 @@ def train_model(config: dict):
         if (epoch + 1) % 5 == 0:
             print(f"\n   📋 Raport detaliat (epoca {epoch+1}):\n{report}")
 
-        # --- Salvare cel mai bun model ---
-        if avg_val_loss < best_val_loss:
+        # --- Salvare cel mai bun model (criteriu: F1 macro) ---
+        if f1 > best_f1:
             best_val_loss = avg_val_loss
             best_f1       = f1
             no_improve    = 0
