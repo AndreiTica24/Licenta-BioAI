@@ -45,10 +45,13 @@ logger = logging.getLogger(__name__)
 # Constante encoding
 # ---------------------------------------------------------------------------
 WINDOW_SIZE   = 200   # fereastră ± 100bp în jurul poziției candidate
-N_CHANNELS    = 6     # A, C, G, T, depth, AF
+N_CHANNELS    = 10    # A_bam, C_bam, G_bam, T_bam, depth, AF, A_ref, C_ref, G_ref, T_ref
 MAX_DEPTH     = 200   # depth de saturație pentru normalizare
 MIN_MAPPING_Q = 1     # filtru minim — eliminăm doar read-urile MQ=0
 MIN_BASE_Q    = 0     # fără filtru pe BQ
+
+# Cale către genomul de referință GRCh38
+REFERENCE_FASTA = "data/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
 
 # One-hot indices pentru nucleotide
 BASE_IDX = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
@@ -69,35 +72,40 @@ def _genotype_to_label(gt: Tuple[int, ...]) -> int:
 def _encode_window(bam: pysam.AlignmentFile,
                    chrom: str,
                    pos: int,
-                   window: int = WINDOW_SIZE) -> np.ndarray:
+                   window: int = WINDOW_SIZE,
+                   fasta: Optional[pysam.FastaFile] = None) -> np.ndarray:
     """
     Construiește o reprezentare CNN 1D pentru fereastra centrată pe `pos`.
 
-    Pentru fiecare coloană din fereastră, calculează din pileup:
-      - one-hot encoding al bazei majoritare
-      - depth normalizat
-      - allele frequency local (procent reads cu baza minoritară)
+    Canale (10 × 200):
+      0-3: one-hot baza majoritară din BAM (A, C, G, T)
+      4:   depth normalizat
+      5:   AF local (procent reads cu baza minoritară)
+      6-9: one-hot baza din referință GRCh38 (A, C, G, T)
 
-    Returneaza tensor (6, 200).
+    Returneaza tensor (10, 200).
     """
     half  = window // 2
     start = max(0, pos - half)
     end   = start + window
 
-    # Inițializăm tensor-ul
     img = np.zeros((N_CHANNELS, window), dtype=np.float32)
 
-    # Normalizare contig
+    # Normalizare contig pentru BAM
     bam_refs = set(bam.references)
-    if chrom not in bam_refs:
-        alt_c = chrom[3:] if chrom.startswith("chr") else "chr" + chrom
+    bam_chrom = chrom
+    if bam_chrom not in bam_refs:
+        alt_c = bam_chrom[3:] if bam_chrom.startswith("chr") else "chr" + bam_chrom
         if alt_c in bam_refs:
-            chrom = alt_c
+            bam_chrom = alt_c
         else:
-            return img  # contig necunoscut, returnăm zeros
+            return img
 
+    # ──────────────────────────────────────────────────────────────────
+    # PARTEA 1: canale 0-5 din BAM (pileup)
+    # ──────────────────────────────────────────────────────────────────
     try:
-        for col in bam.pileup(chrom, start, end,
+        for col in bam.pileup(bam_chrom, start, end,
                                truncate=True,
                                min_base_quality=MIN_BASE_Q,
                                min_mapping_quality=MIN_MAPPING_Q,
@@ -111,7 +119,6 @@ def _encode_window(bam: pysam.AlignmentFile,
             if col_idx < 0 or col_idx >= window:
                 continue
 
-            # Numărăm bazele la această coloană
             base_counts = {'A': 0, 'C': 0, 'G': 0, 'T': 0}
             depth = 0
 
@@ -131,19 +138,38 @@ def _encode_window(bam: pysam.AlignmentFile,
             if depth == 0:
                 continue
 
-            # Baza majoritară primește one-hot=1
             major_base = max(base_counts, key=base_counts.get)
             img[BASE_IDX[major_base], col_idx] = 1.0
-
-            # Depth normalizat
             img[4, col_idx] = min(depth, MAX_DEPTH) / MAX_DEPTH
-
-            # AF local = (reads non-majoritare) / depth
             non_major = depth - base_counts[major_base]
             img[5, col_idx] = non_major / depth
 
     except (ValueError, KeyError, AssertionError):
         pass
+
+    # ──────────────────────────────────────────────────────────────────
+    # PARTEA 2: canale 6-9 din FASTA de referință GRCh38
+    # ──────────────────────────────────────────────────────────────────
+    if fasta is not None:
+        # Normalizare contig pentru FASTA (poate fi diferit de BAM)
+        fasta_refs = set(fasta.references)
+        fasta_chrom = chrom
+        if fasta_chrom not in fasta_refs:
+            alt_c = fasta_chrom[3:] if fasta_chrom.startswith("chr") else "chr" + fasta_chrom
+            if alt_c in fasta_refs:
+                fasta_chrom = alt_c
+            else:
+                return img  # contig necunoscut în FASTA, returnăm doar BAM-encoded
+
+        try:
+            ref_seq = fasta.fetch(fasta_chrom, start, end).upper()
+            for col_idx, base in enumerate(ref_seq):
+                if col_idx >= window:
+                    break
+                if base in BASE_IDX:
+                    img[6 + BASE_IDX[base], col_idx] = 1.0
+        except (ValueError, KeyError):
+            pass
 
     return img
 
@@ -158,22 +184,25 @@ class GenomicDataset(Dataset):
 
     Parametri
     ---------
-    bam_path    : calea la fișierul BAM (indexat .bai)
-    vcf_path    : calea la VCF-ul de referință (benchmark)
-    bed_path    : (NEFOLOSIT — păstrat pentru compatibilitate API)
-    max_samples : numărul maxim de exemple (None = toate)
-    seed        : seed pentru reproducibilitate
+    bam_path     : calea la fișierul BAM (indexat .bai)
+    vcf_path     : calea la VCF-ul de referință (benchmark)
+    bed_path     : (NEFOLOSIT — păstrat pentru compatibilitate API)
+    fasta_path   : calea la genomul de referință GRCh38 (.fasta + .fai)
+    max_samples  : numărul maxim de exemple (None = toate)
+    seed         : seed pentru reproducibilitate
     """
 
     def __init__(self,
                  bam_path:    str,
                  vcf_path:    str,
                  bed_path:    Optional[str] = None,
+                 fasta_path:  str = REFERENCE_FASTA,
                  max_samples: Optional[int] = None,
                  seed:        int = 42):
         self.bam_path    = bam_path
         self.vcf_path    = vcf_path
         self.bed_path    = bed_path
+        self.fasta_path  = fasta_path
         self.max_samples = max_samples
         self.seed        = seed
         self.data_points: List[Dict] = []
@@ -182,7 +211,7 @@ class GenomicDataset(Dataset):
     # ------------------------------------------------------------------
     def _cache_path(self) -> str:
         """Cale unică cache bazată pe parametri."""
-        key = f"{self.vcf_path}|{self.max_samples}|{self.seed}|cnn1d_v1"
+        key = f"{self.vcf_path}|{self.max_samples}|{self.seed}|cnn1d_v2_ref"
         key_hash = hashlib.md5(key.encode()).hexdigest()[:10]
         vcf_stem = os.path.splitext(os.path.basename(self.vcf_path))[0]
         cache_dir = os.path.join(os.path.dirname(self.vcf_path), ".cache")
@@ -293,10 +322,15 @@ class GenomicDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         dp = self.data_points[idx]
 
-        bam = pysam.AlignmentFile(self.bam_path, "rb")
-        x   = _encode_window(bam, dp["chrom"], dp["pos"], window=WINDOW_SIZE)
-        bam.close()
+        bam   = pysam.AlignmentFile(self.bam_path, "rb")
+        fasta = pysam.FastaFile(self.fasta_path)
+        try:
+            x = _encode_window(bam, dp["chrom"], dp["pos"],
+                               window=WINDOW_SIZE, fasta=fasta)
+        finally:
+            bam.close()
+            fasta.close()
 
-        tensor = torch.from_numpy(x)  # (6, 200)
+        tensor = torch.from_numpy(x)  # (10, 200)
         label  = torch.tensor(dp["label"], dtype=torch.long)
         return tensor, label

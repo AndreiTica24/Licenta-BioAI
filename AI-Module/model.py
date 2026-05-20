@@ -32,7 +32,7 @@ class VariantCallerCNN1D(nn.Module):
     """
 
     def __init__(self,
-                 in_channels: int = 6,
+                 in_channels: int = 10,
                  num_classes: int = 3,
                  dropout:     float = 0.3):
         super().__init__()
@@ -98,11 +98,11 @@ class VariantCallerCNN1D(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        x: (B, 6, 200) — 6 canale, 200 poziții
+        x: (B, 10, 200) — 10 canale (6 din BAM + 4 din referință), 200 poziții
         returns: logits (B, 3)
         """
-        assert x.ndim == 3 and x.shape[1] == 6, \
-            f"Input așteptat (B, 6, L), primit {tuple(x.shape)}"
+        assert x.ndim == 3 and x.shape[1] == 10, \
+            f"Input așteptat (B, 10, L), primit {tuple(x.shape)}"
 
         x = self.block1(x)
         x = self.block2(x)
@@ -139,8 +139,8 @@ if __name__ == "__main__":
     total = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Parametri antrenabili: {total:,}")
 
-    x = torch.randn(8, 6, 200)
+    x = torch.randn(8, 10, 200)
     out = model(x)
     print(f"Input:  {x.shape}")
-    print(f"Output: {out.shape}")   # (8, 3)
+    print(f"Output: {out.shape}")
     print(f"Probs:  {model.predict_proba(x)[0]}")
