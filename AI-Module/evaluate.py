@@ -1,126 +1,179 @@
 """
-train.py — Pipeline complet de antrenament
-Antrenează VariantCallerCNN pe HG002 (train) și validează pe HG003.
+evaluate.py — Evaluare finală pe HG004-Mother (test set nevăzut)
+Generează raport complet + export JSON pentru backend Java.
 
 Rulare:
-    python train.py
-    python train.py --epochs 30 --lr 5e-5 --batch_size 64
+    python evaluate.py
+    python evaluate.py --model checkpoints/best_model.pth --max_samples 5000
 """
 
 import argparse
 import json
 import logging
-import random
-import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import (
-    f1_score, precision_score, recall_score, classification_report,
-    confusion_matrix,
+    f1_score, precision_score, recall_score,
+    classification_report, confusion_matrix,
+    roc_auc_score,
 )
 
 from model import VariantCallerCNN
 from dataset import GenomicDataset
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("train.log"),
-        logging.StreamHandler(),
-    ],
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Config default
-# ---------------------------------------------------------------------------
-DEFAULT_CONFIG = {
-    # --- Date ---
-    "bam_train": "data/HG002_Son/151002_7001448_0359_AC7F6GANXX_Sample_HG002-EEogPU_v02-KIT-Av5_AGATGTAC_L008.posiSrt.markDup.bam",
-    "vcf_train": "data/HG002_Son/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf",
-    "bed_train": "data/HG002_Son/HG002_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed",
-
-    "bam_val":   "data/HG003_Father/151002_7001448_0359_AC7F6GANXX_Sample_HG003-EEogPU_v02-KIT-Av5_TCTTCACA_L008.posiSrt.markDup.bam",
-    "vcf_val":   "data/HG003_Father/HG003_GRCh38_1_22_v4.2.1_benchmark.vcf",
-    "bed_val":   "data/HG003_Father/HG003_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed",
-
-    # --- Dimensiuni ---
-    "max_samples_train": 50_000,
-    "max_samples_val":   10_000,
-
-    # --- Hiperparametri ---
-    "batch_size":  32,
-    "epochs":      20,
-    "lr":          1e-4,
-    "weight_decay": 1e-5,
-    "num_workers": 4,
-    "seed":        42,
-
-    # --- Ieșiri ---
-    "output_dir":      "checkpoints",
-    "best_model_path": "checkpoints/best_model.pth",
-    "last_model_path": "checkpoints/last_model.pth",
-    "history_path":    "checkpoints/history.json",
-}
 
 CLASS_NAMES = ["Ref", "Het", "Hom-Alt"]
 
-
 # ---------------------------------------------------------------------------
-# Utilități
+# Config HG004 (test set)
 # ---------------------------------------------------------------------------
-
-def set_seed(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def format_time(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
+DEFAULT_EVAL_CONFIG = {
+    "bam_test": "data/HG004_Mother/HG004.hiseq4000.wes-agilent.50x.dedup.grch38.bam",
+    "vcf_test": "data/HG004_Mother/HG004_GRCh38_1_22_v4.2.1_benchmark.vcf",
+    "bed_test": "data/HG004_Mother/HG004_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed",
+    "max_samples": 10_000,
+    "batch_size":  64,
+    "num_workers": 4,
+    "seed":        42,
+    "model_path":  "checkpoints/best_model.pth",
+    "output_dir":  "results",
+}
 
 
 # ---------------------------------------------------------------------------
-# Evaluare
+# Funcție evaluare cu probabilități
 # ---------------------------------------------------------------------------
 
-def evaluate(model, loader, criterion, device):
+def evaluate_with_probs(model, loader, device):
     """
-    Returnează:
-        avg_loss, f1_macro, precision_macro, recall_macro,
-        classification_report_str, confusion_matrix_array
+    Returnează predicții, labels și probabilități softmax.
     """
     model.eval()
-    total_loss = 0.0
     all_preds  = []
     all_labels = []
+    all_probs  = []
 
     with torch.no_grad():
         for images, labels in loader:
-            images, labels = images.to(device), labels.to(device)
-            outputs = model(images)
-            total_loss += criterion(outputs, labels).item()
-            _, predicted = torch.max(outputs, 1)
-            all_preds.extend(predicted.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+            images = images.to(device)
+            logits = model(images)
+            probs  = F.softmax(logits, dim=1)
+            _, predicted = torch.max(logits, 1)
 
-    avg_loss = total_loss / len(loader)
+            all_preds.extend(predicted.cpu().numpy().tolist())
+            all_labels.extend(labels.numpy().tolist())
+            all_probs.extend(probs.cpu().numpy().tolist())
+
+    return all_labels, all_preds, all_probs
+
+
+# ---------------------------------------------------------------------------
+# Export JSON pentru backend Java
+# ---------------------------------------------------------------------------
+
+def export_for_java(dataset, all_labels, all_preds, all_probs, output_path: str):
+    """
+    Exportă predicțiile în format JSON consumabil de backend-ul Java.
+    Structura: Listă de variante cu predicție + probabilități.
+    """
+    variants = []
+    for i, dp in enumerate(dataset.data_points):
+        if i >= len(all_preds):
+            break
+
+        pred_label = all_preds[i]
+        true_label = all_labels[i]
+        probs      = all_probs[i]
+
+        # Includem DOAR variantele non-Ref (pred sau adevărat)
+        # Backend-ul Java va filtra prin ClinVar
+        entry = {
+            "chrom":           dp["chrom"],
+            "pos":             dp["pos"] + 1,   # 1-indexed (VCF standard)
+            "ref":             dp["ref"],
+            "alt":             dp["alt"],
+            "predicted_class": CLASS_NAMES[pred_label],
+            "predicted_label": pred_label,
+            "true_class":      CLASS_NAMES[true_label],
+            "true_label":      true_label,
+            "prob_ref":        round(probs[0], 4),
+            "prob_het":        round(probs[1], 4),
+            "prob_hom_alt":    round(probs[2], 4),
+            "confidence":      round(max(probs), 4),
+            "is_variant":      pred_label > 0,   # True dacă e Het sau Hom-Alt
+        }
+        variants.append(entry)
+
+    # Statistici sumare
+    n_variants = sum(1 for v in variants if v["is_variant"])
+    n_het      = sum(1 for v in variants if v["predicted_class"] == "Het")
+    n_hom      = sum(1 for v in variants if v["predicted_class"] == "Hom-Alt")
+
+    output = {
+        "metadata": {
+            "total_positions": len(variants),
+            "n_variants":      n_variants,
+            "n_het":           n_het,
+            "n_hom_alt":       n_hom,
+            "model_version":   "VariantCallerCNN-v1",
+        },
+        "variants": variants,
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(output, f, indent=2)
+
+    logger.info(f"Export JSON: {output_path} ({len(variants)} poziții, {n_variants} variante)")
+    return output
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def run_evaluation(config: dict):
+    Path(config["output_dir"]).mkdir(parents=True, exist_ok=True)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\n🔬 Evaluare pe: {device}")
+    if device.type == "cuda":
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
+
+    # --- Încarcă modelul ---
+    print(f"\n📥 Încărcăm modelul: {config['model_path']}")
+    model = VariantCallerCNN.load_from_checkpoint(config["model_path"], device=str(device))
+    model.eval()
+
+    # --- Dataset test (HG004) ---
+    print(f"\n📦 Încărcăm datele de test (HG004-Mother)...")
+    test_dataset = GenomicDataset(
+        bam_path    = config["bam_test"],
+        vcf_path    = config["vcf_test"],
+        bed_path    = config.get("bed_test"),
+        max_samples = config["max_samples"],
+        seed        = config["seed"],
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size  = config["batch_size"],
+        shuffle     = False,
+        num_workers = config["num_workers"],
+        pin_memory  = device.type == "cuda",
+    )
+
+    # --- Evaluare ---
+    print(f"\n⏳ Evaluăm {len(test_dataset)} exemple...")
+    all_labels, all_preds, all_probs = evaluate_with_probs(model, test_loader, device)
+
+    # --- Metrici ---
     f1   = f1_score(all_labels, all_preds, average="macro", zero_division=0)
     prec = precision_score(all_labels, all_preds, average="macro", zero_division=0)
     rec  = recall_score(all_labels, all_preds, average="macro", zero_division=0)
@@ -128,215 +181,78 @@ def evaluate(model, loader, criterion, device):
         all_labels, all_preds, target_names=CLASS_NAMES, zero_division=0
     )
     cm = confusion_matrix(all_labels, all_preds, labels=[0, 1, 2])
-    return avg_loss, f1, prec, rec, report, cm
 
-
-# ---------------------------------------------------------------------------
-# Loop principal
-# ---------------------------------------------------------------------------
-
-def train_model(config: dict):
-    set_seed(config["seed"])
-
-    # Creare director output
-    Path(config["output_dir"]).mkdir(parents=True, exist_ok=True)
-
-    # --- Device ---
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Device: {device}" + (
-        f" ({torch.cuda.get_device_name(0)})" if device.type == "cuda" else ""
-    ))
-    print(f"\n🚀 Antrenament pe: {device}", end="")
-    if device.type == "cuda":
-        print(f"  ({torch.cuda.get_device_name(0)})")
-    else:
-        print("  (CPU — poate fi lent!)")
-
-    # --------------------------------------------------------------------------
-    # 1. Dataset-uri
-    # --------------------------------------------------------------------------
-    print("\n📦 Încărcăm datele de antrenament (HG002-Son)...")
-    train_dataset = GenomicDataset(
-        bam_path    = config["bam_train"],
-        vcf_path    = config["vcf_train"],
-        bed_path    = config.get("bed_train"),
-        max_samples = config["max_samples_train"],
-        seed        = config["seed"],
-    )
-
-    print("\n📦 Încărcăm datele de validare (HG003-Father)...")
-    val_dataset = GenomicDataset(
-        bam_path    = config["bam_val"],
-        vcf_path    = config["vcf_val"],
-        bed_path    = config.get("bed_val"),
-        max_samples = config["max_samples_val"],
-        seed        = config["seed"],
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size  = config["batch_size"],
-        shuffle     = True,
-        num_workers = config["num_workers"],
-        pin_memory  = device.type == "cuda",
-        persistent_workers = config["num_workers"] > 0,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size  = config["batch_size"],
-        shuffle     = False,
-        num_workers = config["num_workers"],
-        pin_memory  = device.type == "cuda",
-        persistent_workers = config["num_workers"] > 0,
-    )
-
-    # --------------------------------------------------------------------------
-    # 2. Model
-    # --------------------------------------------------------------------------
-    model = VariantCallerCNN().to(device)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\n🧠 Model: VariantCallerCNN — {total_params:,} parametri antrenabili")
-
-    # --------------------------------------------------------------------------
-    # 3. Ponderi clase pentru dezechilibru Ref >> Het >> Hom
-    # --------------------------------------------------------------------------
-    label_counts = defaultdict(int)
-    for dp in train_dataset.data_points:
-        label_counts[dp["label"]] += 1
-
-    total = sum(label_counts.values())
-    weights = torch.tensor(
-        [total / (3 * max(label_counts[i], 1)) for i in range(3)],
-        dtype=torch.float32,
-    ).to(device)
-    print(f"⚖️  Ponderi clase: Ref={weights[0]:.3f} | Het={weights[1]:.3f} | Hom={weights[2]:.3f}")
-
-    criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=0.05)
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr           = config["lr"],
-        weight_decay = config["weight_decay"],
-    )
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6
-    )
-
-    # --------------------------------------------------------------------------
-    # 4. Loop de antrenament
-    # --------------------------------------------------------------------------
-    best_val_loss = float("inf")
-    best_f1       = 0.0
-    history       = {"train_loss": [], "val_loss": [], "f1": [], "lr": []}
-    no_improve    = 0
-    PATIENCE      = 7  # early stopping
-
-    print(f"\n⏳ Antrenament: {config['epochs']} epoci, "
-          f"batch={config['batch_size']}, lr={config['lr']}\n")
-    print("=" * 70)
-
-    for epoch in range(config["epochs"]):
-        epoch_start = time.time()
-
-        # --- TRAIN ---
-        model.train()
-        train_loss  = 0.0
-        train_steps = 0
-
-        for batch_idx, (images, labels) in enumerate(train_loader):
-            images, labels = images.to(device), labels.to(device)
-            optimizer.zero_grad()
-            loss = criterion(model(images), labels)
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            train_loss  += loss.item()
-            train_steps += 1
-
-            # Progress bar simplu
-            if (batch_idx + 1) % 50 == 0:
-                print(f"  [{batch_idx+1:4d}/{len(train_loader)}] "
-                      f"loss={train_loss/train_steps:.4f}", end="\r")
-
-        avg_train_loss = train_loss / len(train_loader)
-
-        # --- VALIDARE ---
-        avg_val_loss, f1, prec, rec, report, cm = evaluate(
-            model, val_loader, criterion, device
+    # AUC-ROC (One-vs-Rest)
+    try:
+        probs_np = np.array(all_probs)
+        auc = roc_auc_score(
+            all_labels, probs_np, multi_class="ovr", average="macro"
         )
-        scheduler.step(avg_val_loss)
+    except Exception:
+        auc = None
 
-        current_lr = optimizer.param_groups[0]["lr"]
-        elapsed    = time.time() - epoch_start
-
-        # Istoricul
-        history["train_loss"].append(round(avg_train_loss, 6))
-        history["val_loss"].append(round(avg_val_loss, 6))
-        history["f1"].append(round(f1, 6))
-        history["lr"].append(current_lr)
-
-        # --- Afișare epocă ---
-        print(f"\n📊 Epoca {epoch+1:02d}/{config['epochs']}  "
-              f"[{format_time(elapsed)}]  lr={current_lr:.2e}")
-        print(f"   Train Loss : {avg_train_loss:.4f}")
-        print(f"   Val   Loss : {avg_val_loss:.4f}")
-        print(f"   F1 macro   : {f1:.4f}  |  Precision: {prec:.4f}  |  Recall: {rec:.4f}")
-        print(f"   Confusion Matrix:")
-        for i, row in enumerate(cm):
-            print(f"     {CLASS_NAMES[i]:8s}: {row}")
-
-        # Raport detaliat la fiecare 5 epoci
-        if (epoch + 1) % 5 == 0:
-            print(f"\n   📋 Raport detaliat (epoca {epoch+1}):\n{report}")
-
-        # --- Salvare cel mai bun model ---
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            best_f1       = f1
-            no_improve    = 0
-            torch.save(
-                {
-                    "epoch":              epoch + 1,
-                    "model_state_dict":   model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "val_loss":           best_val_loss,
-                    "f1":                 best_f1,
-                    "config":             config,
-                    "class_names":        CLASS_NAMES,
-                },
-                config["best_model_path"],
-            )
-            print(f"   💾 Best model salvat (val_loss={best_val_loss:.4f}, F1={best_f1:.4f})")
-        else:
-            no_improve += 1
-
-        print()
-
-        # Early stopping
-        if no_improve >= PATIENCE:
-            print(f"⏹️  Early stopping la epoca {epoch+1} "
-                  f"(nicio îmbunătățire în {PATIENCE} epoci)")
-            break
-
-    # --------------------------------------------------------------------------
-    # 5. Salvare model final + istoricul
-    # --------------------------------------------------------------------------
-    torch.save(model.state_dict(), config["last_model_path"])
-
-    with open(config["history_path"], "w") as f:
-        json.dump(history, f, indent=2)
-
-    # Salvăm și config-ul folosit
-    config_path = Path(config["output_dir"]) / "config_used.json"
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
-
+    # --- Afișare ---
+    print("\n" + "=" * 70)
+    print("📊 REZULTATE FINALE — HG004-Mother (Test Set Nevăzut)")
     print("=" * 70)
-    print(f"\n✅ Antrenament finalizat!")
-    print(f"   Best model : {config['best_model_path']}  "
-          f"(val_loss={best_val_loss:.4f}, F1={best_f1:.4f})")
-    print(f"   Last model : {config['last_model_path']}")
-    print(f"   Istoricul  : {config['history_path']}")
-    print(f"\n💡 Pasul următor: python evaluate.py  (test set HG004-Mother)")
+    print(f"   F1  macro  : {f1:.4f}")
+    print(f"   Precision  : {prec:.4f}")
+    print(f"   Recall     : {rec:.4f}")
+    if auc is not None:
+        print(f"   AUC-ROC    : {auc:.4f}")
+    print(f"\n{report}")
+    print("Confusion Matrix (rând=adevărat, coloană=prezis):")
+    print(f"   {'':10s} " + "  ".join(f"{n:8s}" for n in CLASS_NAMES))
+    for i, row in enumerate(cm):
+        vals = "  ".join(f"{v:8d}" for v in row)
+        print(f"   {CLASS_NAMES[i]:10s} {vals}")
+    print("=" * 70)
+
+    # --- Salvare raport text ---
+    report_path = Path(config["output_dir"]) / "evaluation_report.txt"
+    with open(report_path, "w") as f:
+        f.write("RAPORT EVALUARE — VariantCallerCNN\n")
+        f.write(f"Model: {config['model_path']}\n")
+        f.write(f"Test set: HG004-Mother\n\n")
+        f.write(f"F1 macro   : {f1:.4f}\n")
+        f.write(f"Precision  : {prec:.4f}\n")
+        f.write(f"Recall     : {rec:.4f}\n")
+        if auc is not None:
+            f.write(f"AUC-ROC    : {auc:.4f}\n")
+        f.write(f"\n{report}\n")
+        f.write("Confusion Matrix:\n")
+        f.write(f"   {'':10s} " + "  ".join(f"{n:8s}" for n in CLASS_NAMES) + "\n")
+        for i, row in enumerate(cm):
+            vals = "  ".join(f"{v:8d}" for v in row)
+            f.write(f"   {CLASS_NAMES[i]:10s} {vals}\n")
+
+    print(f"\n💾 Raport salvat: {report_path}")
+
+    # --- Export JSON pentru backend Java ---
+    json_path = Path(config["output_dir"]) / "predictions_for_java.json"
+    export_data = export_for_java(
+        test_dataset, all_labels, all_preds, all_probs, str(json_path)
+    )
+    print(f"📤 Export Java: {json_path}")
+    print(f"   {export_data['metadata']['n_variants']} variante identificate "
+          f"(Het={export_data['metadata']['n_het']}, "
+          f"Hom-Alt={export_data['metadata']['n_hom_alt']})")
+
+    # --- Metrici JSON (pentru plots) ---
+    metrics_path = Path(config["output_dir"]) / "metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump({
+            "f1_macro":   round(f1, 6),
+            "precision":  round(prec, 6),
+            "recall":     round(rec, 6),
+            "auc_roc":    round(auc, 6) if auc else None,
+            "confusion_matrix": cm.tolist(),
+            "class_names": CLASS_NAMES,
+        }, f, indent=2)
+
+    print(f"📊 Metrici JSON: {metrics_path}")
+    print(f"\n💡 Backend Java poate consuma: {json_path}")
+    print(f"   Format: {{chrom, pos, ref, alt, predicted_class, prob_*, confidence, is_variant}}")
 
 
 # ---------------------------------------------------------------------------
@@ -344,34 +260,23 @@ def train_model(config: dict):
 # ---------------------------------------------------------------------------
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="VariantCallerCNN — Antrenament")
-    parser.add_argument("--epochs",      type=int,   default=None)
-    parser.add_argument("--lr",          type=float, default=None)
-    parser.add_argument("--batch_size",  type=int,   default=None)
-    parser.add_argument("--max_train",   type=int,   default=None)
-    parser.add_argument("--max_val",     type=int,   default=None)
-    parser.add_argument("--num_workers", type=int,   default=None)
-    parser.add_argument("--seed",        type=int,   default=None)
-    parser.add_argument("--output_dir",  type=str,   default=None)
+    parser = argparse.ArgumentParser(description="VariantCallerCNN — Evaluare")
+    parser.add_argument("--model",       type=str, default=None)
+    parser.add_argument("--max_samples", type=int, default=None)
+    parser.add_argument("--batch_size",  type=int, default=None)
+    parser.add_argument("--num_workers", type=int, default=None)
+    parser.add_argument("--output_dir",  type=str, default=None)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    config = DEFAULT_CONFIG.copy()
+    config = DEFAULT_EVAL_CONFIG.copy()
 
-    # Override din CLI
-    if args.epochs      is not None: config["epochs"]             = args.epochs
-    if args.lr          is not None: config["lr"]                 = args.lr
-    if args.batch_size  is not None: config["batch_size"]         = args.batch_size
-    if args.max_train   is not None: config["max_samples_train"]  = args.max_train
-    if args.max_val     is not None: config["max_samples_val"]    = args.max_val
-    if args.num_workers is not None: config["num_workers"]        = args.num_workers
-    if args.seed        is not None: config["seed"]               = args.seed
-    if args.output_dir  is not None:
-        config["output_dir"]      = args.output_dir
-        config["best_model_path"] = f"{args.output_dir}/best_model.pth"
-        config["last_model_path"] = f"{args.output_dir}/last_model.pth"
-        config["history_path"]    = f"{args.output_dir}/history.json"
+    if args.model       is not None: config["model_path"]  = args.model
+    if args.max_samples is not None: config["max_samples"] = args.max_samples
+    if args.batch_size  is not None: config["batch_size"]  = args.batch_size
+    if args.num_workers is not None: config["num_workers"] = args.num_workers
+    if args.output_dir  is not None: config["output_dir"]  = args.output_dir
 
-    train_model(config)
+    run_evaluation(config)
