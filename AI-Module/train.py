@@ -45,12 +45,13 @@ logger = logging.getLogger(__name__)
 # Config default
 # ---------------------------------------------------------------------------
 DEFAULT_CONFIG = {
-    "bam_train": "data/HG002_Son/HG002.hiseq4000.wes-agilent.50x.dedup.grch38.bam",
-    "vcf_train": "data/HG002_Son/HG002_exome.vcf",
+    # === EXPERIMENT VALIDARE: HG003 (tată) → HG004 (mamă) — neînrudiți ===
+    "bam_train": "data/HG003_Father/HG003.hiseq4000.wes-agilent.50x.dedup.grch38.bam",
+    "vcf_train": "data/HG003_Father/HG003_exome.vcf",
     "bed_train": None,
 
-    "bam_val":   "data/HG003_Father/HG003.hiseq4000.wes-agilent.50x.dedup.grch38.bam",
-    "vcf_val":   "data/HG003_Father/HG003_exome.vcf",
+    "bam_val":   "data/HG004_Mother/HG004.hiseq4000.wes-agilent.50x.dedup.grch38.bam",
+    "vcf_val":   "data/HG004_Mother/HG004_exome.vcf",
     "bed_val":   None,
 
     "max_samples_train": 50_000,
@@ -63,10 +64,10 @@ DEFAULT_CONFIG = {
     "num_workers": 4,
     "seed":        42,
 
-    "output_dir":      "checkpoints",
-    "best_model_path": "checkpoints/best_model.pth",
-    "last_model_path": "checkpoints/last_model.pth",
-    "history_path":    "checkpoints/history.json",
+    "output_dir":      "checkpoints_unrelated",
+    "best_model_path": "checkpoints_unrelated/best_model.pth",
+    "last_model_path": "checkpoints_unrelated/last_model.pth",
+    "history_path":    "checkpoints_unrelated/history.json",
 }
 
 CLASS_NAMES = ["Ref", "Het", "Hom-Alt"]
