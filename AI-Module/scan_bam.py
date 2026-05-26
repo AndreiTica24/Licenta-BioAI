@@ -10,9 +10,14 @@ Un BAM exomic conține ~60 milioane de poziții cu coverage. Din acestea,
 de către modelul AI ar fi computațional ineficientă și ar produce milioane
 de false positives.
 
-Acest script aplică pragul STANDARD din literatura de specialitate:
-  - depth >= 10 (confidence statistică pentru genotyping)
-  - AF >= 0.15 (filtru pentru zgomot de secvențiere ~1-3%)
+Acest script aplică pragul STRICT pentru maximă eficiență:
+  - depth >= 15 (confidence statistică foarte robustă)
+  - AF >= 0.20 (filtru anti-zgomot strict, păstrează doar variante clare)
+
+PRAGURI ALTERNATIVE EVALUATE:
+  Strict   (depth>=15, AF>=0.20) → ~30-50k candidați, ~5 min ← FOLOSIT
+  Standard (depth>=10, AF>=0.15) → ~100k candidați, ~16 min
+  Permisiv (depth>=5,  AF>=0.10) → ~200k candidați, ~30+ min
 
 Referințe:
   - Poplin et al. (2018) "A universal SNP and small-indel variant caller
@@ -22,7 +27,6 @@ Referințe:
 
 OUTPUT:
   Fișier TSV cu coloanele: chrom, pos, ref_base, depth, alt_count, AF
-  Acest fișier va fi consumat de predict.py pentru clasificarea finală.
 
 Rulare:
     python scan_bam.py --bam input.bam --output candidates.tsv
@@ -51,10 +55,10 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# Constante pentru pre-filtrare (PRAGUL STANDARD)
+# Constante pentru pre-filtrare (PRAGUL STRICT)
 # ============================================================================
-MIN_DEPTH        = 10      # Minimum 10 read-uri (statistic robust)
-MIN_AF           = 0.15    # Minimum 15% reads cu baza alternativă (anti-zgomot)
+MIN_DEPTH        = 15      # Minimum 15 read-uri (statistic foarte robust)
+MIN_AF           = 0.20    # Minimum 20% reads cu baza alternativă (anti-zgomot strict)
 MIN_BASE_QUAL    = 13      # Filtru calitate bază (Q13 = 95% acuratețe)
 MIN_MAPPING_QUAL = 20      # Filtru calitate mapping (Q20 = 99% acuratețe)
 

@@ -19,3 +19,9 @@ AI-Module/inspect_images.py
 AI-Module/model_simple.py
 AI-Module/train_simple.log
 AI-Module/train_simple.py
+AI-Module/api_jobs/250a33ad-7e7d-4baf-a579-bae89f2a802d/HG004_test.json
+AI-Module/predict_api.log
+AI-Module/results/HG004_candidates_strict.tsv
+AI-Module/results/HG004_predicted.json
+AI-Module/results/HG004_predicted_strict.json
+AI-Module/.api_key
