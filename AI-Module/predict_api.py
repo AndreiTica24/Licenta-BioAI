@@ -145,6 +145,16 @@ def process_bam(job_id: str, bam_path: str, sample_name: str,
         if not os.path.exists(bam_path):
             raise FileNotFoundError(f"BAM nu există: {bam_path}")
 
+        # Verificăm/generăm index .bai dacă lipsește
+        bai_path = bam_path + ".bai"
+        bai_alt  = bam_path.replace(".bam", ".bai")
+        if not os.path.exists(bai_path) and not os.path.exists(bai_alt):
+            job["progress"] = "Generare index BAM (.bai)..."
+            logger.info(f"[{job_id}] Index lipsă, generez .bai...")
+            import pysam
+            pysam.index(bam_path)
+            logger.info(f"[{job_id}] Index .bai generat")
+
         # PASUL 1: scan_bam
         job["progress"] = "Pre-filtrare BAM (~15 min)..."
         logger.info(f"[{job_id}] Pre-filtrare...")
