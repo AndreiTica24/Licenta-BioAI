@@ -7,7 +7,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import ro.licenta.genomicsapi.model.Variant;
 import ro.licenta.genomicsapi.service.PythonApiClient;
+import ro.licenta.genomicsapi.service.VepAnnotationService;
 
 import java.io.File;
 import java.io.IOException;
@@ -16,21 +18,19 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * VariantController — endpoint-uri pentru variant calling.
+ * VariantController — endpoint-uri pentru variant calling + anotare.
  *
- * POST /api/variants/upload       — upload BAM + pornire analiză
- * GET  /api/variants/status/{id}  — status job
- * GET  /api/variants/result/{id}  — rezultat JSON
- * GET  /api/variants/vcf/{id}     — download VCF
- *
- * NOTĂ ARHITECTURĂ:
- * BAM-ul e salvat pe disk Windows (uploads/), iar Python (WSL) îl citește
- * prin calea /mnt/c/... — conversie făcută de toWslPath().
+ * POST /api/variants/upload         — upload BAM + pornire analiză AI
+ * GET  /api/variants/status/{id}    — status job AI
+ * GET  /api/variants/result/{id}    — rezultat JSON din AI
+ * GET  /api/variants/vcf/{id}       — download VCF de la AI
+ * POST /api/variants/annotate/{id}  — anotare VEP+ClinVar pe VCF (după AI)
  */
 @RestController
 @RequestMapping("/api/variants")
@@ -39,12 +39,18 @@ public class VariantController {
     private static final Logger log = LoggerFactory.getLogger(VariantController.class);
 
     private final PythonApiClient pythonApiClient;
+    private final VepAnnotationService vepService;
 
     @Value("${app.upload.directory}")
     private String uploadDir;
 
-    public VariantController(PythonApiClient pythonApiClient) {
+    @Value("${app.vep.data-dir:C:/vep_data}")
+    private String vepDataDir;
+
+    public VariantController(PythonApiClient pythonApiClient,
+                             VepAnnotationService vepService) {
         this.pythonApiClient = pythonApiClient;
+        this.vepService = vepService;
     }
 
     /**
@@ -182,22 +188,80 @@ public class VariantController {
     }
 
     /**
+     * Anotează un VCF (de la un job AI completat) cu VEP+ClinVar.
+     * Descarcă VCF de la Python, apelează VEP Docker, returnează variante anotate.
+     */
+    @PostMapping("/annotate/{jobId}")
+    public ResponseEntity<Map<String, Object>> annotateVariants(
+            @PathVariable String jobId) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        try {
+            // 1. Descărcăm VCF-ul de la Python
+            log.info("[{}] Descărcăm VCF de la Python...", jobId);
+            String vcfContent = pythonApiClient.getJobResultVcf(jobId);
+
+            // 2. Salvăm temporar în vep_data/input/
+            Path vepInputDir = Paths.get(vepDataDir, "input");
+            Files.createDirectories(vepInputDir);
+            Path vcfPath = vepInputDir.resolve("ai_predictions_" + jobId + ".vcf");
+            Files.writeString(vcfPath, vcfContent);
+            log.info("[{}] VCF salvat: {} ({} variante)", jobId, vcfPath,
+                    vcfContent.lines().filter(l -> !l.startsWith("#")).count());
+
+            // 3. Rulăm VEP
+            log.info("[{}] Pornesc anotare VEP...", jobId);
+            long t0 = System.currentTimeMillis();
+            List<Variant> variants = vepService.annotateVcf(vcfPath.toString());
+            long vepTime = (System.currentTimeMillis() - t0) / 1000;
+
+            // 4. Statistici
+            Map<String, Long> byClassification = variants.stream()
+                    .collect(Collectors.groupingBy(
+                            v -> v.getFinalClassification() != null
+                                    ? v.getFinalClassification() : "UNKNOWN",
+                            Collectors.counting()
+                    ));
+
+            long withClinvar = variants.stream()
+                    .filter(v -> v.getClinSig() != null && !v.getClinSig().isEmpty())
+                    .count();
+
+            long withGene = variants.stream()
+                    .filter(v -> v.getGeneSymbol() != null && !v.getGeneSymbol().isEmpty())
+                    .count();
+
+            // 5. Răspuns
+            response.put("job_id", jobId);
+            response.put("n_variants", variants.size());
+            response.put("with_clinvar", withClinvar);
+            response.put("with_gene", withGene);
+            response.put("by_classification", byClassification);
+            response.put("annotation_time_s", vepTime);
+            response.put("variants", variants);
+
+            log.info("[{}] Anotare completă: {} variante, {} cu ClinVar, {} cu genă, {}s",
+                    jobId, variants.size(), withClinvar, withGene, vepTime);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Eroare anotare VEP pentru job " + jobId, e);
+            response.put("error", e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /**
      * Convertește o cale Windows (C:\Users\...) în cale WSL (/mnt/c/Users/...).
-     *
-     * Exemplu:
-     *   C:\Users\GOGUL\...\ploads\file.bam
-     *   → /mnt/c/Users/GOGUL/.../uploads/file.bam
      */
     private String toWslPath(String windowsPath) {
-        // Înlocuim backslash cu slash
         String path = windowsPath.replace("\\", "/");
-
-        // Detectăm litera de drive (C:, D:, etc.) și o convertim
         if (path.length() >= 2 && path.charAt(1) == ':') {
             char driveLetter = Character.toLowerCase(path.charAt(0));
             path = "/mnt/" + driveLetter + path.substring(2);
         }
-
         return path;
     }
 }
