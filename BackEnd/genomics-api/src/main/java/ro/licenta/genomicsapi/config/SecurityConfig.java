@@ -60,6 +60,9 @@ public class SecurityConfig {
                         // Admin endpoint-uri
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
+                        // Variante: USER sau ADMIN
+                        .requestMatchers("/api/variants/**").hasAnyRole("USER", "ADMIN")
+
                         // Restul necesită autentificare
                         .anyRequest().authenticated()
                 )
