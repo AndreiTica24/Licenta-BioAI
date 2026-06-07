@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Variant Report — GenomicsAPI</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <style>
+        .tabs-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+        .tab-button {
+            padding: 12px 18px;
+            cursor: pointer;
+            color: var(--text-muted);
+            border-bottom: 2px solid transparent;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .tab-button.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        .tab-panel {
+            display: none;
+        }
+        .tab-panel.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+    <a href="/dashboard" class="navbar-brand">GenomicsAPI</a>
+    <ul class="navbar-nav">
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li><a href="/admin" id="admin-link" style="display:none;">Admin Panel</a></li>
+        <li><div class="user-info" id="user-info"></div></li>
+    </ul>
+</nav>
+
+<div class="container">
+
+    <!-- HEADER -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+        <div>
+            <h1 style="font-size:28px;">🧬 Clinical Variant Report</h1>
+            <p style="color:var(--text-muted); margin-top:4px;">
+                AI predictions enriched with ClinVar, gnomAD, SIFT, and PolyPhen-2 annotations
+            </p>
+        </div>
+        <div>
+            <a href="#" id="download-vcf" class="btn btn-secondary" download>📥 Download VCF</a>
+            <a href="/dashboard" class="btn btn-secondary">← Back</a>
+        </div>
+    </div>
+
+    <!-- LOADING -->
+    <div id="loading" class="card" style="text-align:center; padding:48px;">
+        <span class="loader" style="width:48px; height:48px;"></span>
+        <p id="loading-text" style="margin-top:16px; color:var(--text-muted);">
+            Loading results...
+        </p>
+    </div>
+
+    <!-- ERROR -->
+    <div id="result-error" class="alert alert-error" style="display:none;"></div>
+
+    <!-- REPORT -->
+    <div id="report" style="display:none;">
+
+        <!-- Statistics -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="stat-total">-</div>
+                <div class="label">Total Variants</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="stat-clinvar">-</div>
+                <div class="label">ClinVar Matches</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="stat-genes">-</div>
+                <div class="label">Gene-Mapped</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="stat-time">-</div>
+                <div class="label">Annotation Time</div>
+            </div>
+        </div>
+
+        <!-- Classification Distribution -->
+        <div class="card">
+            <h2 class="card-title">📊 Clinical Classification</h2>
+            <p class="card-subtitle">
+                Distribution of variants based on ClinVar significance and in-silico predictions
+            </p>
+            <div id="classification-chart"></div>
+        </div>
+
+        <!-- Tabs for variant tables -->
+        <div class="card">
+            <div class="tabs-tabs">
+                <div class="tab-button active" onclick="switchTab('important')">
+                    🚨 Pathogenic / Likely Pathogenic
+                    (<span id="count-important">0</span>)
+                </div>
+                <div class="tab-button" onclick="switchTab('vus')">
+                    ⚠️ VUS (Uncertain)
+                    (<span id="count-vus">0</span>)
+                </div>
+                <div class="tab-button" onclick="switchTab('all')">
+                    📋 All Gene-Mapped
+                    (<span id="count-all">0</span>)
+                </div>
+            </div>
+
+            <!-- IMPORTANT (Pathogenic) -->
+            <div id="tab-important" class="tab-panel active">
+                <p class="card-subtitle">
+                    ⚡ <strong>Action recommended:</strong> These variants are linked to known
+                    medical conditions and warrant clinical review.
+                </p>
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Gene</th>
+                        <th>Consequence</th>
+                        <th>Classification</th>
+                        <th>Disease</th>
+                        <th>AI Conf.</th>
+                    </tr>
+                    </thead>
+                    <tbody id="important-variants"></tbody>
+                </table>
+            </div>
+
+            <!-- VUS -->
+            <div id="tab-vus" class="tab-panel">
+                <p class="card-subtitle">
+                    Variants of Uncertain Significance — insufficient evidence to classify
+                    as pathogenic or benign. May require further research.
+                </p>
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Gene</th>
+                        <th>Consequence</th>
+                        <th>Classification</th>
+                        <th>Disease</th>
+                        <th>AI Conf.</th>
+                    </tr>
+                    </thead>
+                    <tbody id="vus-variants"></tbody>
+                </table>
+            </div>
+
+            <!-- ALL -->
+            <div id="tab-all" class="tab-panel">
+                <p class="card-subtitle">
+                    All variants successfully mapped to known genes by Ensembl VEP.
+                </p>
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Gene</th>
+                        <th>Consequence</th>
+                        <th>Classification</th>
+                        <th>Disease</th>
+                        <th>AI Conf.</th>
+                    </tr>
+                    </thead>
+                    <tbody id="all-variants"></tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<script src="/js/auth.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/results.js"></script>
+<script>
+    requireAuth();
+    renderUserInfo();
+
+    // Extract jobId from URL path /result/{jobId}
+    const jobId = window.location.pathname.split('/').pop();
+    loadResults(jobId);
+
+    function switchTab(name) {
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        event.target.classList.add('active');
+        document.getElementById('tab-' + name).classList.add('active');
+    }
+</script>
+</body>
+</html>

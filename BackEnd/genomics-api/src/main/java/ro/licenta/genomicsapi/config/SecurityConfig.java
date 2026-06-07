@@ -57,6 +57,11 @@ public class SecurityConfig {
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/error").permitAll()
 
+                        // Pagini HTML și resurse statice
+                        .requestMatchers("/", "/login", "/dashboard", "/admin").permitAll()
+                        .requestMatchers("/result/**").permitAll()
+                        .requestMatchers("/css/**", "/js/**", "/img/**", "/favicon.ico").permitAll()
+
                         // Admin endpoint-uri
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 

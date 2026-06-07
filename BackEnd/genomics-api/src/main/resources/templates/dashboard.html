@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — GenomicsAPI</title>
+    <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+    <a href="/dashboard" class="navbar-brand">GenomicsAPI</a>
+    <ul class="navbar-nav">
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li><a href="/admin" id="admin-link" style="display:none;">Admin Panel</a></li>
+        <li><div class="user-info" id="user-info"></div></li>
+    </ul>
+</nav>
+
+<!-- MAIN CONTAINER -->
+<div class="container">
+
+    <!-- UPLOAD CARD -->
+    <div class="card">
+        <h2 class="card-title">🧬 New Genomic Analysis</h2>
+        <p class="card-subtitle">
+            Upload a BAM file (Binary Alignment Map) to detect genetic variants and
+            obtain a clinical annotation report using AI (CNN) and ClinVar/Ensembl VEP.
+        </p>
+
+        <div id="upload-error" class="alert alert-error" style="display:none;"></div>
+
+        <form onsubmit="handleUploadSubmit(event)" id="upload-form">
+            <div class="upload-area" id="upload-area">
+                <input type="file" id="file-input" accept=".bam" style="display:none;">
+                <div class="icon">📁</div>
+                <div class="text">
+                    Drop your BAM file here or <strong>click to browse</strong>
+                </div>
+                <div class="text" style="font-size:13px; margin-top:8px;">
+                    Supported: .bam (up to 10 GB)
+                </div>
+            </div>
+
+            <div id="file-info" style="display:none; margin-top:16px;
+                                       background:var(--bg); padding:12px;
+                                       border-radius:var(--radius);">
+                <strong>📄 Selected:</strong> <span id="file-name"></span>
+                (<span id="file-size"></span>)
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px;">
+                <div class="form-group">
+                    <label class="form-label" for="sample-name">Sample Name</label>
+                    <input type="text" id="sample-name" class="form-input"
+                           value="my_sample" placeholder="e.g., patient_001">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="confidence">Confidence Threshold</label>
+                    <input type="number" id="confidence" class="form-input"
+                           value="0.7" min="0.5" max="0.99" step="0.05">
+                    <div class="form-help">Minimum AI confidence (0.5-0.99)</div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="upload-button" disabled
+                    style="margin-top:8px;">
+                🚀 Start Analysis
+            </button>
+        </form>
+
+        <!-- PROGRESS SECTION -->
+        <div id="progress-section" style="display:none; margin-top:24px;
+                                          padding:16px; background:var(--bg);
+                                          border-radius:var(--radius);">
+            <div id="progress-text" style="margin-bottom:8px; font-size:14px;
+                                            color:var(--text-muted);">
+                Preparing...
+            </div>
+            <div class="progress">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JOBS HISTORY CARD -->
+    <div class="card">
+        <h2 class="card-title">📊 Analysis History</h2>
+        <p class="card-subtitle">All your previous BAM analyses.</p>
+
+        <table class="table">
+            <thead>
+            <tr>
+                <th>Job ID</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Variants</th>
+                <th class="actions">Actions</th>
+            </tr>
+            </thead>
+            <tbody id="jobs-table-body">
+            <tr><td colspan="5" style="text-align:center; padding:24px; color:var(--text-muted);">
+                Loading...
+            </td></tr>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+<script src="/js/auth.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/upload.js"></script>
+<script>
+    // Require auth
+    requireAuth();
+    renderUserInfo();
+    initUploadArea();
+    loadJobs();
+
+    // Refresh job list every 30 seconds
+    setInterval(loadJobs, 30000);
+</script>
+</body>
+</html>

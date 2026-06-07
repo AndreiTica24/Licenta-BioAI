@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel — GenomicsAPI</title>
+    <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+    <a href="/dashboard" class="navbar-brand">GenomicsAPI</a>
+    <ul class="navbar-nav">
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li><a href="/admin" id="admin-link">Admin Panel</a></li>
+        <li><div class="user-info" id="user-info"></div></li>
+    </ul>
+</nav>
+
+<div class="container">
+
+    <h1 style="font-size:28px; margin-bottom:8px;">👑 Admin Panel</h1>
+    <p style="color:var(--text-muted); margin-bottom:24px;">
+        System administration — manage users and view global statistics.
+    </p>
+
+    <div id="admin-error" class="alert alert-error" style="display:none;"></div>
+
+    <!-- STATS -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="value" id="stat-total-users">-</div>
+            <div class="label">Total Users</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="stat-total-admins">-</div>
+            <div class="label">Administrators</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="stat-total-normal">-</div>
+            <div class="label">Regular Users</div>
+        </div>
+    </div>
+
+    <!-- USERS TABLE -->
+    <div class="card">
+        <h2 class="card-title">👥 Registered Users</h2>
+        <p class="card-subtitle">Manage all user accounts in the system.</p>
+
+        <table class="table">
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Full Name</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Registered</th>
+                <th class="actions">Actions</th>
+            </tr>
+            </thead>
+            <tbody id="users-table-body">
+            <tr><td colspan="7" style="text-align:center; padding:24px;
+                                            color:var(--text-muted);">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+<script src="/js/auth.js"></script>
+<script src="/js/api.js"></script>
+<script>
+    requireAdmin();
+    renderUserInfo();
+    loadAdminPanel();
+
+    async function loadAdminPanel() {
+        try {
+            // Load stats
+            const stats = await apiGet('/api/admin/stats');
+            document.getElementById('stat-total-users').textContent = stats.total_users;
+            document.getElementById('stat-total-admins').textContent = stats.total_admins;
+            document.getElementById('stat-total-normal').textContent = stats.total_normal_users;
+
+            // Load users
+            const users = await apiGet('/api/admin/users');
+            renderUsers(users);
+        } catch (e) {
+            const errorBox = document.getElementById('admin-error');
+            errorBox.textContent = e.message;
+            errorBox.style.display = 'block';
+        }
+    }
+
+    function renderUsers(users) {
+        const tbody = document.getElementById('users-table-body');
+        const auth = getAuth();
+
+        if (users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px;">No users found.</td></tr>';
+            return;
+        }
+
+        const rows = users.map(u => {
+            const roleBadge = u.role === 'ADMIN'
+                ? '<span class="badge badge-status-failed">ADMIN</span>'
+                : '<span class="badge badge-status-running">USER</span>';
+            const statusBadge = u.enabled
+                ? '<span class="badge badge-status-completed">Active</span>'
+                : '<span class="badge badge-status-failed">Disabled</span>';
+
+            // Don't allow deleting yourself or other admins
+            const canDelete = u.email !== auth.email && u.role !== 'ADMIN';
+            const deleteBtn = canDelete
+                ? `<button class="btn btn-danger" style="padding:6px 12px; font-size:13px;"
+                          onclick="deleteUser(${u.id}, '${u.email}')">Delete</button>`
+                : '-';
+
+            return `
+                <tr>
+                    <td><code>${u.id}</code></td>
+                    <td>${u.email}</td>
+                    <td>${u.fullName}</td>
+                    <td>${roleBadge}</td>
+                    <td>${statusBadge}</td>
+                    <td><small>${formatDate(u.createdAt)}</small></td>
+                    <td class="actions">${deleteBtn}</td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.innerHTML = rows;
+    }
+
+    async function deleteUser(id, email) {
+        if (!confirm(`Are you sure you want to delete user "${email}"? This action cannot be undone.`)) {
+            return;
+        }
+        try {
+            await apiDelete(`/api/admin/users/${id}`);
+            alert('User deleted successfully');
+            loadAdminPanel();
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+</script>
+</body>
+</html>

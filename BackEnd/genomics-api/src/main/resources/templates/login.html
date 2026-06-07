@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GenomicsAPI — Sign in</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <style>
+        .login-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+        .login-card {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            width: 100%;
+            max-width: 440px;
+            box-shadow: 0 8px 32px rgba(13, 110, 253, 0.12);
+        }
+        .login-logo {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .login-logo .icon {
+            font-size: 48px;
+        }
+        .login-logo h1 {
+            font-size: 24px;
+            color: var(--primary);
+            margin-top: 8px;
+        }
+        .login-logo p {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 12px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: var(--text-muted);
+            font-weight: 600;
+            transition: var(--transition);
+        }
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        .demo-info {
+            background: var(--bg);
+            padding: 12px;
+            border-radius: var(--radius);
+            margin-top: 20px;
+            font-size: 13px;
+            color: var(--text-muted);
+            border-left: 3px solid var(--info);
+        }
+        .demo-info strong { color: var(--text); }
+        .demo-info code {
+            background: white;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+<div class="login-page">
+    <div class="login-card">
+        <div class="login-logo">
+            <div class="icon">🧬</div>
+            <h1>GenomicsAPI</h1>
+            <p>AI-powered Variant Calling Platform</p>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="login" onclick="showTab('login')">Login</div>
+            <div class="tab" data-tab="register" onclick="showTab('register')">Register</div>
+        </div>
+
+        <!-- LOGIN FORM -->
+        <div id="login-content" class="tab-content">
+            <div id="login-error" class="alert alert-error" style="display:none;"></div>
+            <form onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label class="form-label" for="login-email">Email</label>
+                    <input type="email" id="login-email" name="email"
+                           class="form-input" required
+                           placeholder="your.email@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="login-password">Password</label>
+                    <input type="password" id="login-password" name="password"
+                           class="form-input" required
+                           placeholder="Enter password">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Login</button>
+            </form>
+
+            <div class="demo-info">
+                <strong>Demo credentials:</strong><br>
+                Admin: <code>admin@genomics.ro</code> / <code>Admin123!</code><br>
+                User: <code>pacient@test.ro</code> / <code>Pacient123!</code>
+            </div>
+        </div>
+
+        <!-- REGISTER FORM -->
+        <div id="register-content" class="tab-content" style="display:none;">
+            <div id="register-error" class="alert alert-error" style="display:none;"></div>
+            <form onsubmit="handleRegister(event)">
+                <div class="form-group">
+                    <label class="form-label" for="reg-name">Full Name</label>
+                    <input type="text" id="reg-name" name="fullName"
+                           class="form-input" required
+                           placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="reg-email">Email</label>
+                    <input type="email" id="reg-email" name="email"
+                           class="form-input" required
+                           placeholder="your.email@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="reg-password">Password</label>
+                    <input type="password" id="reg-password" name="password"
+                           class="form-input" required minlength="8"
+                           placeholder="At least 8 characters">
+                    <div class="form-help">Minimum 8 characters</div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="/js/auth.js"></script>
+<script>
+    // If already logged in, redirect to dashboard
+    if (getAuth()) {
+        window.location.href = '/dashboard';
+    }
+</script>
+</body>
+</html>
