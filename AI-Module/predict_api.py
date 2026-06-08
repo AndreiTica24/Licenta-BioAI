@@ -186,8 +186,8 @@ def process_bam(job_id: str, bam_path: str, sample_name: str,
             model_path     = MODEL_PATH,
             output_vcf     = output_vcf,
             output_json    = output_json,
-            batch_size     = 256,
-            num_workers    = threads,
+            batch_size     = 512,
+            num_workers    = 8,
             confidence     = confidence,
         )
         predict_time = time.time() - t0
