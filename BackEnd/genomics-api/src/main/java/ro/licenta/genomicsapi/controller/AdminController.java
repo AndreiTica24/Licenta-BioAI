@@ -9,10 +9,6 @@ import ro.licenta.genomicsapi.repository.UserRepository;
 import java.util.List;
 import java.util.Map;
 
-/**
- * AdminController — endpoint-uri exclusiv pentru ADMIN.
- * Toate metodele sunt protejate cu @PreAuthorize("hasRole('ADMIN')").
- */
 @RestController
 @RequestMapping("/api/admin")
 @PreAuthorize("hasRole('ADMIN')")

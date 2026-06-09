@@ -1,13 +1,6 @@
-/* ============================================================================
-   upload.js — BAM upload + job polling
-   ============================================================================ */
-
 let currentJobId = null;
 let pollingInterval = null;
 
-/**
- * Initialize upload area with click + drag-and-drop.
- */
 function initUploadArea() {
     const uploadArea = document.getElementById('upload-area');
     const fileInput = document.getElementById('file-input');
@@ -37,9 +30,6 @@ function initUploadArea() {
     fileInput.addEventListener('change', handleFileSelection);
 }
 
-/**
- * Display selected file info.
- */
 function handleFileSelection() {
     const fileInput = document.getElementById('file-input');
     const fileInfo = document.getElementById('file-info');
@@ -65,9 +55,6 @@ function handleFileSelection() {
     uploadButton.disabled = false;
 }
 
-/**
- * Handle upload form submission.
- */
 async function handleUploadSubmit(event) {
     event.preventDefault();
 
@@ -114,9 +101,6 @@ async function handleUploadSubmit(event) {
     }
 }
 
-/**
- * Poll job status every 5 seconds until completion.
- */
 function startPollingStatus(jobId) {
     if (pollingInterval) {
         clearInterval(pollingInterval);
@@ -148,9 +132,6 @@ function startPollingStatus(jobId) {
     }, 5000);
 }
 
-/**
- * Update progress display based on job status.
- */
 function updateProgressDisplay(status) {
     const progressText = document.getElementById('progress-text');
     const progressBar = document.getElementById('progress-bar');
@@ -166,20 +147,14 @@ function updateProgressDisplay(status) {
     }
 }
 
-/**
- * Load all jobs (currently uses local storage as a workaround).
- * In a future iteration, we'd add an endpoint /api/variants/my-jobs.
- */
 async function loadJobs() {
     const jobsTable = document.getElementById('jobs-table-body');
     if (!jobsTable) return;
 
-    // For now, we'll store job IDs in localStorage per user
     const auth = getAuth();
     const jobsKey = `genomics_jobs_${auth.email}`;
     let jobIds = JSON.parse(localStorage.getItem(jobsKey) || '[]');
 
-    // Add current job if not in list
     if (currentJobId && !jobIds.includes(currentJobId)) {
         jobIds.unshift(currentJobId);
         localStorage.setItem(jobsKey, JSON.stringify(jobIds));
@@ -190,7 +165,6 @@ async function loadJobs() {
         return;
     }
 
-    // Fetch status for each job
     const rows = [];
     for (const jobId of jobIds) {
         try {
@@ -205,9 +179,6 @@ async function loadJobs() {
     jobsTable.innerHTML = rows.join('');
 }
 
-/**
- * Render one job row in the table.
- */
 function renderJobRow(job) {
     const statusBadge = `<span class="badge badge-status-${job.status}">${job.status}</span>`;
     const variants = job.n_variants ? `${job.n_variants.toLocaleString()}` : '-';

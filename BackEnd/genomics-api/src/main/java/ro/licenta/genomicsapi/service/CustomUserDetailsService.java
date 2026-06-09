@@ -6,10 +6,6 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import ro.licenta.genomicsapi.repository.UserRepository;
 
-/**
- * CustomUserDetailsService — Spring Security caută users prin acest service.
- * Folosit la validarea tokens-urilor JWT și la login.
- */
 @Service
 public class CustomUserDetailsService implements UserDetailsService {
 

@@ -1,30 +1,18 @@
-/* ============================================================================
-   api.js — REST API client with JWT auto-injection
-   ============================================================================ */
-
-/**
- * Generic API call with JWT in Authorization header.
- * Auto-logout on 401/403.
- */
 async function apiCall(path, options = {}) {
     const auth = getAuth();
     if (!auth) {
         window.location.href = '/login';
         throw new Error('Not authenticated');
     }
-
     const headers = options.headers || {};
     headers['Authorization'] = `Bearer ${auth.token}`;
-
     if (options.body && !(options.body instanceof FormData)) {
         headers['Content-Type'] = 'application/json';
     }
-
     const response = await fetch(path, {
         ...options,
         headers
     });
-
     if (response.status === 401 || response.status === 403) {
         // Token expired or invalid → logout
         logout();
@@ -34,9 +22,6 @@ async function apiCall(path, options = {}) {
     return response;
 }
 
-/**
- * GET request that returns JSON.
- */
 async function apiGet(path) {
     const response = await apiCall(path);
     if (!response.ok) {
@@ -46,9 +31,6 @@ async function apiGet(path) {
     return response.json();
 }
 
-/**
- * POST request with JSON body.
- */
 async function apiPost(path, body) {
     const response = await apiCall(path, {
         method: 'POST',
@@ -61,9 +43,6 @@ async function apiPost(path, body) {
     return response.json();
 }
 
-/**
- * DELETE request.
- */
 async function apiDelete(path) {
     const response = await apiCall(path, { method: 'DELETE' });
     if (!response.ok) {
@@ -73,10 +52,6 @@ async function apiDelete(path) {
     return response.json();
 }
 
-/**
- * Upload BAM file with progress tracking.
- * Uses XMLHttpRequest to support progress events.
- */
 function uploadBam(file, sampleName, confidence, onProgress) {
     return new Promise((resolve, reject) => {
         const auth = getAuth();
@@ -89,7 +64,6 @@ function uploadBam(file, sampleName, confidence, onProgress) {
         formData.append('file', file);
         formData.append('sampleName', sampleName);
         formData.append('confidence', confidence);
-
         const xhr = new XMLHttpRequest();
 
         xhr.upload.addEventListener('progress', (e) => {
@@ -121,16 +95,12 @@ function uploadBam(file, sampleName, confidence, onProgress) {
 
         xhr.addEventListener('error', () => reject(new Error('Network error')));
         xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-
         xhr.open('POST', '/api/variants/upload');
         xhr.setRequestHeader('Authorization', `Bearer ${auth.token}`);
         xhr.send(formData);
     });
 }
 
-/**
- * Format file size in human-readable form.
- */
 function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -138,9 +108,6 @@ function formatFileSize(bytes) {
     return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
-/**
- * Format date in human-readable form.
- */
 function formatDate(isoString) {
     if (!isoString) return '-';
     const d = new Date(isoString);

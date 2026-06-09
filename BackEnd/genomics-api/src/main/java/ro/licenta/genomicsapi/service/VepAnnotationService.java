@@ -11,22 +11,6 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-/**
- * VepAnnotationService — apelează Ensembl VEP via Docker pentru anotarea
- * variantelor cu informații clinice (ClinVar, gnomAD, SIFT, PolyPhen).
- *
- * COMANDA DOCKER ECHIVALENTĂ:
- *   docker run --rm -v C:\vep_data:/data ensemblorg/ensembl-vep \
- *     vep --input_file /data/input/variants.vcf \
- *         --output_file /data/input/variants_annotated.vcf \
- *         --cache --dir_cache /data --offline \
- *         --fasta /data/homo_sapiens/115_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz \
- *         --assembly GRCh38 \
- *         --custom file=/data/plugins/clinvar.vcf.gz,short_name=ClinVar,format=vcf,type=exact,fields=CLNSIG%CLNDN%CLNREVSTAT \
- *         --vcf --force_overwrite
- *
- * Output: VCF anotat parsat în List<Variant>.
- */
 @Service
 public class VepAnnotationService {
 
@@ -41,20 +25,10 @@ public class VepAnnotationService {
     @Value("${app.vep.timeout-minutes:30}")
     private int timeoutMinutes;
 
-    /**
-     * Anotează un fișier VCF cu VEP+ClinVar.
-     *
-     * @param inputVcfPath calea VCF de intrare (poate fi orice locație)
-     * @return lista de variante cu anotări complete
-     */
     public List<Variant> annotateVcf(String inputVcfPath) throws IOException, InterruptedException {
         log.info("Pornesc anotare VEP pentru: {}", inputVcfPath);
-
-        // Folosim subfolderul /input din vep_data ca punct de intrare/ieșire pentru Docker
         Path vepInputDir = Paths.get(vepDataDir, "input");
         Files.createDirectories(vepInputDir);
-
-        // Copiem VCF-ul de intrare în /input dacă nu e deja acolo
         Path inputVcf = Paths.get(inputVcfPath);
         Path stagedInput = vepInputDir.resolve(inputVcf.getFileName());
         if (!stagedInput.toAbsolutePath().equals(inputVcf.toAbsolutePath())) {
@@ -66,9 +40,6 @@ public class VepAnnotationService {
         String outputName = inputName.replace(".vcf", "_annotated.vcf");
         Path outputVcf = vepInputDir.resolve(outputName);
 
-        // Construim comanda docker run
-        // Pe Windows, calea volumelor are format C:\vep_data:/data
-        // Java ProcessBuilder folosește forward slash care funcționează pe Docker Desktop
         String volumeMount = vepDataDir.replace("\\", "/") + ":/data";
 
         List<String> command = new ArrayList<>();
@@ -79,24 +50,30 @@ public class VepAnnotationService {
         command.add(volumeMount);
         command.add(dockerImage);
         command.add("vep");
-        command.add("--input_file");  command.add("/data/input/" + inputName);
-        command.add("--output_file"); command.add("/data/input/" + outputName);
+        command.add("--input_file");
+        command.add("/data/input/" + inputName);
+        command.add("--output_file");
+        command.add("/data/input/" + outputName);
         command.add("--cache");
-        command.add("--dir_cache");   command.add("/data");
+        command.add("--dir_cache");
+        command.add("/data");
         command.add("--offline");
         command.add("--fasta");
         command.add("/data/homo_sapiens/115_GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz");
-        command.add("--assembly");    command.add("GRCh38");
+        command.add("--assembly");
+        command.add("GRCh38");
         command.add("--custom");
         command.add("file=/data/plugins/clinvar.vcf.gz,short_name=ClinVar,format=vcf,type=exact,fields=CLNSIG%CLNDN%CLNREVSTAT");
         command.add("--vcf");
         command.add("--force_overwrite");
-        command.add("--no_stats");      // skip generare HTML stats (mai rapid)
-        command.add("--symbol");        // adaugă simbolul genei
-        command.add("--biotype");       // tipul de transcript
-        command.add("--hgvs");          // notația HGVS
-        command.add("--sift");          command.add("b");   // both prediction + score
-        command.add("--polyphen");      command.add("b");
+        command.add("--no_stats");
+        command.add("--symbol");
+        command.add("--biotype");
+        command.add("--hgvs");
+        command.add("--sift");
+        command.add("b");
+        command.add("--polyphen");
+        command.add("b");
 
         log.info("Rulez comanda Docker VEP...");
         long t0 = System.currentTimeMillis();
@@ -105,7 +82,6 @@ public class VepAnnotationService {
         pb.redirectErrorStream(true);
         Process process = pb.start();
 
-        // Citim output-ul în timp real (pentru log)
         StringBuilder outputLog = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream()))) {
@@ -134,24 +110,12 @@ public class VepAnnotationService {
 
         log.info("VEP completat în {}s", durationSec);
 
-        // Parsăm VCF-ul anotat
         List<Variant> variants = parseAnnotatedVcf(outputVcf);
         log.info("Parsate {} variante din VCF anotat", variants.size());
 
         return variants;
     }
 
-    /**
-     * Parsează un VCF anotat de VEP și extrage informațiile relevante
-     * din câmpul CSQ.
-     *
-     * Format CSQ așteptat (definit în comanda --vcf):
-     *   Allele|Consequence|IMPACT|SYMBOL|Gene|Feature_type|Feature|BIOTYPE|EXON|
-     *   INTRON|HGVSc|HGVSp|cDNA_position|CDS_position|Protein_position|
-     *   Amino_acids|Codons|Existing_variation|DISTANCE|STRAND|FLAGS|
-     *   SYMBOL_SOURCE|HGNC_ID|SOURCE|SIFT|PolyPhen|ClinVar|ClinVar_CLNSIG|
-     *   ClinVar_CLNDN|ClinVar_CLNREVSTAT
-     */
     private List<Variant> parseAnnotatedVcf(Path vcfPath) throws IOException {
         List<Variant> variants = new ArrayList<>();
         List<String> csqFields = null;
@@ -159,14 +123,12 @@ public class VepAnnotationService {
         try (BufferedReader reader = Files.newBufferedReader(vcfPath)) {
             String line;
             while ((line = reader.readLine()) != null) {
-                // Header: extragem ordinea câmpurilor CSQ
                 if (line.startsWith("##INFO=<ID=CSQ")) {
                     csqFields = extractCsqFieldOrder(line);
                     continue;
                 }
                 if (line.startsWith("#")) continue;
 
-                // Linie de date
                 Variant variant = parseVariantLine(line, csqFields);
                 if (variant != null) {
                     variants.add(variant);
@@ -177,22 +139,14 @@ public class VepAnnotationService {
         return variants;
     }
 
-    /**
-     * Extrage ordinea câmpurilor din header-ul ##INFO=<ID=CSQ Format: ...>
-     */
     private List<String> extractCsqFieldOrder(String headerLine) {
         int formatIdx = headerLine.indexOf("Format: ");
         if (formatIdx == -1) return Collections.emptyList();
         String formatStr = headerLine.substring(formatIdx + 8);
-        // Eliminăm "> de la final
         formatStr = formatStr.replaceAll("[\">]+$", "");
         return Arrays.asList(formatStr.split("\\|"));
     }
 
-    /**
-     * Parsează o linie de variantă din VCF anotat.
-     * Format: CHROM POS ID REF ALT QUAL FILTER INFO FORMAT SAMPLE
-     */
     private Variant parseVariantLine(String line, List<String> csqFields) {
         String[] cols = line.split("\t");
         if (cols.length < 8) return null;
@@ -203,17 +157,14 @@ public class VepAnnotationService {
         v.setRef(cols[3]);
         v.setAlt(cols[4]);
 
-        // Extragem datele din câmpul INFO
         String info = cols[7];
         Map<String, String> infoMap = parseInfoField(info);
 
-        // Date predict CNN (din comanda noastră)
         if (infoMap.containsKey("AF"))      v.setAf(parseDoubleSafe(infoMap.get("AF")));
         if (infoMap.containsKey("DP"))      v.setDepth(parseIntSafe(infoMap.get("DP")));
         if (infoMap.containsKey("CONF"))    v.setConfidence(parseDoubleSafe(infoMap.get("CONF")));
         if (infoMap.containsKey("GT_PRED")) v.setPredictedClass(infoMap.get("GT_PRED"));
 
-        // Câmpul CSQ — prima anotare (din mai multe, dacă există)
         if (infoMap.containsKey("CSQ") && csqFields != null && !csqFields.isEmpty()) {
             String csqValue = infoMap.get("CSQ").split(",")[0];  // primul transcript
             String[] csqVals = csqValue.split("\\|", -1);
@@ -237,7 +188,6 @@ public class VepAnnotationService {
             v.setClinReviewStatus(csqMap.getOrDefault("ClinVar_CLNREVSTAT", ""));
         }
 
-        // Calculăm clasificarea finală
         v.setFinalClassification(computeFinalClassification(v));
 
         return v;
@@ -256,14 +206,6 @@ public class VepAnnotationService {
         return map;
     }
 
-    /**
-     * Logică de clasificare finală pe baza ClinVar + predicții in-silico.
-     *
-     * Prioritate:
-     *  1. ClinVar (dacă există) — sursa cea mai sigură
-     *  2. SIFT + PolyPhen pentru variante necunoscute
-     *  3. UNKNOWN dacă nu avem nicio informație
-     */
     private String computeFinalClassification(Variant v) {
         // 1. ClinVar
         String cs = v.getClinSig();
@@ -282,7 +224,6 @@ public class VepAnnotationService {
             }
         }
 
-        // 2. SIFT + PolyPhen (pentru variante necunoscute clinic)
         String sift = v.getSift();
         String poly = v.getPolyphen();
         if (sift != null && !sift.isEmpty() && poly != null && !poly.isEmpty()) {
@@ -293,7 +234,6 @@ public class VepAnnotationService {
             return "LIKELY_BENIGN";
         }
 
-        // 3. Impact înalt (consecințe biologice cunoscute)
         String impact = v.getImpact();
         if ("HIGH".equals(impact)) return "LIKELY_PATHOGENIC";
         if ("MODERATE".equals(impact)) return "VUS";
@@ -303,7 +243,6 @@ public class VepAnnotationService {
         return "UNKNOWN";
     }
 
-    // Helper-uri
     private double parseDoubleSafe(String s) {
         try { return Double.parseDouble(s); }
         catch (NumberFormatException e) { return 0.0; }

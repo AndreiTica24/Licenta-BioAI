@@ -10,12 +10,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * HealthController — endpoint-uri pentru verificarea stării sistemului.
- *
- * GET /api/health         — status backend Java
- * GET /api/health/python  — verifică conexiunea cu Python AI service
- */
 @RestController
 @RequestMapping("/api/health")
 public class HealthController {
@@ -23,9 +17,6 @@ public class HealthController {
     @Value("${app.python-api.url}")
     private String pythonApiUrl;
 
-    /**
-     * Test simplu — confirmă că backend-ul Java rulează.
-     */
     @GetMapping
     public ResponseEntity<Map<String, Object>> health() {
         Map<String, Object> response = new HashMap<>();
@@ -36,10 +27,6 @@ public class HealthController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Test conexiune Windows → WSL Python API.
-     * Apelează GET /health pe serverul Python.
-     */
     @GetMapping("/python")
     public ResponseEntity<Map<String, Object>> pythonHealth() {
         Map<String, Object> response = new HashMap<>();
@@ -66,7 +53,7 @@ public class HealthController {
             response.put("python_url", pythonApiUrl);
             response.put("connection", "❌ FAILED");
             response.put("error", e.getMessage());
-            response.put("hint", "Verifică dacă uvicorn rulează în WSL pe portul 8000");
+            response.put("hint", "Verifica daca uvicorn ruleaza în WSL pe portul 8000");
 
             return ResponseEntity.status(503).body(response);
         }

@@ -16,14 +16,6 @@ import ro.licenta.genomicsapi.service.JwtService;
 
 import java.io.IOException;
 
-/**
- * JwtAuthenticationFilter — interceptor care:
- *   1. Citește header-ul "Authorization: Bearer <token>"
- *   2. Validează tokenul cu JwtService
- *   3. Pune Authentication în SecurityContext dacă e valid
- *
- * Apoi Spring Security poate decide dacă utilizatorul are voie să acceseze endpoint-ul.
- */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -44,18 +36,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         final String authHeader = request.getHeader("Authorization");
 
-        // Fără header sau format greșit → continuăm fără auth
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String jwt = authHeader.substring(7);  // după "Bearer "
+        final String jwt = authHeader.substring(7);
 
         try {
             final String email = jwtService.extractUsername(jwt);
 
-            // Dacă tokenul are email și nu suntem deja autentificați
             if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
@@ -69,7 +59,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
         } catch (Exception e) {
-            // Token invalid sau expirat — lăsăm Spring să decidă (returnează 401/403)
             logger.debug("JWT invalid: " + e.getMessage());
         }
 

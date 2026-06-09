@@ -20,12 +20,6 @@ import ro.licenta.genomicsapi.service.JwtService;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * AuthController — endpoint-uri pentru autentificare.
- *
- * POST /api/auth/register — creează utilizator nou (rol USER)
- * POST /api/auth/login    — login + returnează JWT
- */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -55,7 +49,7 @@ public class AuthController {
 
         if (userRepository.existsByEmail(request.getEmail())) {
             Map<String, String> error = new HashMap<>();
-            error.put("error", "Email-ul este deja înregistrat");
+            error.put("error", "Email-ul deja inregistrat");
             return ResponseEntity.badRequest().body(error);
         }
 
@@ -63,7 +57,7 @@ public class AuthController {
                 request.getEmail(),
                 passwordEncoder.encode(request.getPassword()),
                 request.getFullName(),
-                Role.USER  // utilizatorii noi primesc automat rolul USER
+                Role.USER
         );
 
         userRepository.save(user);
@@ -81,7 +75,6 @@ public class AuthController {
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
 
         try {
-            // Spring Security verifică user + parolă
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
                             request.getEmail(), request.getPassword())
@@ -99,9 +92,9 @@ public class AuthController {
             ));
 
         } catch (Exception e) {
-            log.warn("Login eșuat pentru: {}", request.getEmail());
+            log.warn("Login esuat pentru: {}", request.getEmail());
             Map<String, String> error = new HashMap<>();
-            error.put("error", "Email sau parolă incorectă");
+            error.put("error", "Email sau parola incorecta");
             return ResponseEntity.status(401).body(error);
         }
     }

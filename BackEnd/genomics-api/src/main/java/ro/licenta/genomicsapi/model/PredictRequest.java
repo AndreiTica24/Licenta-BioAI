@@ -1,16 +1,5 @@
 package ro.licenta.genomicsapi.model;
 
-/**
- * PredictRequest — corespunde body-ului așteptat de Python API /predict.
- *
- * Python (FastAPI) așteaptă:
- *   {
- *     "bam_path": "...",
- *     "sample_name": "...",
- *     "threads": 4,
- *     "confidence": 0.7
- *   }
- */
 public class PredictRequest {
 
     private String bamPath;
@@ -25,10 +14,6 @@ public class PredictRequest {
         this.bamPath = bamPath;
         this.sampleName = sampleName;
     }
-
-    // IMPORTANT: Python așteaptă "bam_path" (snake_case), nu "bamPath".
-    // Numele JSON sunt mapate în PythonApiClient prin Map manual,
-    // deci aici păstrăm camelCase Java standard.
 
     public String getBamPath() {
         return bamPath;

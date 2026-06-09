@@ -23,15 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * VariantController — endpoint-uri pentru variant calling + anotare.
- *
- * POST /api/variants/upload         — upload BAM + pornire analiză AI
- * GET  /api/variants/status/{id}    — status job AI
- * GET  /api/variants/result/{id}    — rezultat JSON din AI
- * GET  /api/variants/vcf/{id}       — download VCF de la AI
- * POST /api/variants/annotate/{id}  — anotare VEP+ClinVar pe VCF (după AI)
- */
 @RestController
 @RequestMapping("/api/variants")
 public class VariantController {
@@ -53,10 +44,6 @@ public class VariantController {
         this.vepService = vepService;
     }
 
-    /**
-     * Upload BAM + pornire analiză.
-     * Streaming direct la disk (nu acumulează în RAM).
-     */
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> uploadBam(
             @RequestParam("file") MultipartFile file,
@@ -65,7 +52,6 @@ public class VariantController {
 
         Map<String, Object> response = new HashMap<>();
 
-        // Validări de bază
         if (file.isEmpty()) {
             response.put("error", "Fișierul e gol");
             return ResponseEntity.badRequest().body(response);
@@ -78,15 +64,12 @@ public class VariantController {
         }
 
         try {
-            // Creăm directorul de upload dacă nu există
             Path uploadPath = Paths.get(uploadDir).toAbsolutePath();
             Files.createDirectories(uploadPath);
 
-            // Numele fișierului salvat (evităm coliziuni cu timestamp)
             String savedName = System.currentTimeMillis() + "_" + originalName;
             Path bamPath = uploadPath.resolve(savedName);
 
-            // STREAMING upload — copiem stream-ul direct la disk
             log.info("Upload BAM: {} ({} MB)", originalName,
                     file.getSize() / (1024 * 1024));
 
@@ -101,17 +84,10 @@ public class VariantController {
             }
             long uploadTime = (System.currentTimeMillis() - t0) / 1000;
             log.info("BAM salvat în {} ({}s)", bamPath, uploadTime);
-
-            // IMPORTANT: BAM-ul are nevoie de index .bai. Verificăm dacă există.
-            // Pentru demo, presupunem că .bai vine separat sau e generat de Python.
             Path baiPath = Paths.get(bamPath.toString() + ".bai");
             boolean hasBai = Files.exists(baiPath);
-
-            // Convertim calea Windows în cale WSL (/mnt/c/...)
             String wslBamPath = toWslPath(bamPath.toString());
             log.info("Cale WSL pentru Python: {}", wslBamPath);
-
-            // Pornim predicția pe Python
             String jobId = pythonApiClient.startPrediction(
                     wslBamPath, sampleName, 4, confidence);
 
@@ -121,29 +97,26 @@ public class VariantController {
             response.put("size_mb", file.getSize() / (1024 * 1024));
             response.put("upload_time_s", uploadTime);
             response.put("has_index", hasBai);
-            response.put("message", "BAM încărcat. Analiza a pornit.");
+            response.put("message", "BAM incarcat. Analiza a pornit.");
 
             if (!hasBai) {
                 response.put("warning",
-                        "Index .bai lipsește — Python îl va genera (poate dura mai mult)");
+                        "Index .bai lipseste — Python il va genera");
             }
 
             return ResponseEntity.ok(response);
 
         } catch (IOException e) {
             log.error("Eroare upload BAM", e);
-            response.put("error", "Eroare la salvarea fișierului: " + e.getMessage());
+            response.put("error", "Eroare la salvarea fisierului: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
         } catch (Exception e) {
-            log.error("Eroare pornire analiză", e);
+            log.error("Eroare pornire analiza", e);
             response.put("error", "Eroare la pornirea analizei: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
         }
     }
 
-    /**
-     * Status job.
-     */
     @GetMapping("/status/{jobId}")
     public ResponseEntity<Map<String, Object>> getStatus(@PathVariable String jobId) {
         try {
@@ -156,9 +129,6 @@ public class VariantController {
         }
     }
 
-    /**
-     * Rezultat JSON (variantele detectate).
-     */
     @GetMapping("/result/{jobId}")
     public ResponseEntity<Map<String, Object>> getResult(@PathVariable String jobId) {
         try {
@@ -171,9 +141,6 @@ public class VariantController {
         }
     }
 
-    /**
-     * Download VCF.
-     */
     @GetMapping(value = "/vcf/{jobId}", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> getVcf(@PathVariable String jobId) {
         try {
@@ -187,10 +154,6 @@ public class VariantController {
         }
     }
 
-    /**
-     * Anotează un VCF (de la un job AI completat) cu VEP+ClinVar.
-     * Descarcă VCF de la Python, apelează VEP Docker, returnează variante anotate.
-     */
     @PostMapping("/annotate/{jobId}")
     public ResponseEntity<Map<String, Object>> annotateVariants(
             @PathVariable String jobId) {
@@ -198,11 +161,9 @@ public class VariantController {
         Map<String, Object> response = new HashMap<>();
 
         try {
-            // 1. Descărcăm VCF-ul de la Python
-            log.info("[{}] Descărcăm VCF de la Python...", jobId);
+            log.info("[{}] Descarcam VCF ...", jobId);
             String vcfContent = pythonApiClient.getJobResultVcf(jobId);
 
-            // 2. Salvăm temporar în vep_data/input/
             Path vepInputDir = Paths.get(vepDataDir, "input");
             Files.createDirectories(vepInputDir);
             Path vcfPath = vepInputDir.resolve("ai_predictions_" + jobId + ".vcf");
@@ -210,13 +171,11 @@ public class VariantController {
             log.info("[{}] VCF salvat: {} ({} variante)", jobId, vcfPath,
                     vcfContent.lines().filter(l -> !l.startsWith("#")).count());
 
-            // 3. Rulăm VEP
             log.info("[{}] Pornesc anotare VEP...", jobId);
             long t0 = System.currentTimeMillis();
             List<Variant> variants = vepService.annotateVcf(vcfPath.toString());
             long vepTime = (System.currentTimeMillis() - t0) / 1000;
 
-            // 4. Statistici
             Map<String, Long> byClassification = variants.stream()
                     .collect(Collectors.groupingBy(
                             v -> v.getFinalClassification() != null
@@ -232,7 +191,6 @@ public class VariantController {
                     .filter(v -> v.getGeneSymbol() != null && !v.getGeneSymbol().isEmpty())
                     .count();
 
-            // 5. Răspuns
             response.put("job_id", jobId);
             response.put("n_variants", variants.size());
             response.put("with_clinvar", withClinvar);
@@ -253,9 +211,6 @@ public class VariantController {
         }
     }
 
-    /**
-     * Convertește o cale Windows (C:\Users\...) în cale WSL (/mnt/c/Users/...).
-     */
     private String toWslPath(String windowsPath) {
         String path = windowsPath.replace("\\", "/");
         if (path.length() >= 2 && path.charAt(1) == ':') {

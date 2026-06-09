@@ -14,13 +14,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
-/**
- * JwtService — generare și validare tokens JWT.
- *
- * Format token: <header>.<payload>.<signature>
- * Algoritm semnătură: HMAC-SHA256
- * Expirare: configurabilă din application.properties (default 24h)
- */
 @Service
 public class JwtService {
 
@@ -30,15 +23,11 @@ public class JwtService {
     @Value("${app.jwt.expiration-ms}")
     private long expirationMs;
 
-    /**
-     * Generează un JWT pentru un user, cu rolul ca claim.
-     */
     public String generateToken(UserDetails userDetails) {
         return generateToken(new HashMap<>(), userDetails);
     }
 
     public String generateToken(Map<String, Object> extraClaims, UserDetails userDetails) {
-        // Adăugăm rolul ca claim
         extraClaims.put("role", userDetails.getAuthorities().iterator().next().getAuthority());
 
         return Jwts.builder()
@@ -50,16 +39,10 @@ public class JwtService {
                 .compact();
     }
 
-    /**
-     * Extrage email-ul (subject) din token.
-     */
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
     }
 
-    /**
-     * Validează că tokenul nu e expirat și aparține user-ului.
-     */
     public boolean isTokenValid(String token, UserDetails userDetails) {
         final String username = extractUsername(token);
         return username.equals(userDetails.getUsername()) && !isTokenExpired(token);

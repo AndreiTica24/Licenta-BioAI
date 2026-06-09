@@ -9,10 +9,6 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * User — entitate JPA pentru tabela USERS.
- * Implementează UserDetails pentru integrare cu Spring Security.
- */
 @Entity
 @Table(name = "users")
 public class User implements UserDetails {
@@ -48,8 +44,6 @@ public class User implements UserDetails {
         this.fullName = fullName;
         this.role = role;
     }
-
-    // ===== UserDetails implementation =====
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

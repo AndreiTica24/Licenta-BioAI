@@ -1,10 +1,3 @@
-/* ============================================================================
-   results.js — Display medical report with VEP annotations
-   ============================================================================ */
-
-/**
- * Load and display annotation results for a job.
- */
 async function loadResults(jobId) {
     const loadingDiv = document.getElementById('loading');
     const reportDiv = document.getElementById('report');
@@ -15,23 +8,17 @@ async function loadResults(jobId) {
     errorBox.style.display = 'none';
 
     try {
-        // First check job status
         const status = await apiGet(`/api/variants/status/${jobId}`);
-
         if (status.status !== 'completed') {
             throw new Error(`Job is in state "${status.status}". Please wait for completion.`);
         }
-
-        // Trigger VEP annotation
         document.getElementById('loading-text').textContent =
             '🧬 Running clinical annotation (ClinVar + VEP)... This takes ~30 seconds.';
 
         const result = await apiPost(`/api/variants/annotate/${jobId}`);
-
         renderReport(result, jobId);
         loadingDiv.style.display = 'none';
         reportDiv.style.display = 'block';
-
     } catch (e) {
         loadingDiv.style.display = 'none';
         errorBox.textContent = e.message;
@@ -39,51 +26,31 @@ async function loadResults(jobId) {
     }
 }
 
-/**
- * Render the medical report from VEP annotation result.
- */
 function renderReport(data, jobId) {
-    // Statistics cards
     document.getElementById('stat-total').textContent = data.n_variants.toLocaleString();
     document.getElementById('stat-clinvar').textContent = data.with_clinvar.toLocaleString();
     document.getElementById('stat-genes').textContent = data.with_gene.toLocaleString();
     document.getElementById('stat-time').textContent = data.annotation_time_s + 's';
-
-    // Classification distribution
     const dist = data.by_classification || {};
     renderClassificationChart(dist);
-
-    // Pathogenic / Likely pathogenic variants (most important)
     const importantVariants = data.variants.filter(v =>
         v.finalClassification === 'PATHOGENIC' ||
         v.finalClassification === 'LIKELY_PATHOGENIC'
     );
     renderVariantsTable('important-variants', importantVariants, 50);
-
-    // VUS variants (uncertain)
     const vusVariants = data.variants.filter(v =>
         v.finalClassification === 'VUS'
     );
     renderVariantsTable('vus-variants', vusVariants, 50);
-
-    // All gene-affecting variants summary
     const allWithGene = data.variants.filter(v =>
         v.geneSymbol && v.geneSymbol.length > 0
     );
     renderVariantsTable('all-variants', allWithGene, 100);
-
-    // Update counters
     document.getElementById('count-important').textContent = importantVariants.length;
     document.getElementById('count-vus').textContent = vusVariants.length;
     document.getElementById('count-all').textContent = allWithGene.length;
-
-    // Download links
     document.getElementById('download-vcf').href = `/api/variants/vcf/${jobId}`;
 }
-
-/**
- * Render classification distribution as bar chart.
- */
 function renderClassificationChart(dist) {
     const container = document.getElementById('classification-chart');
     const order = ['PATHOGENIC', 'LIKELY_PATHOGENIC', 'VUS', 'LIKELY_BENIGN', 'BENIGN', 'UNKNOWN'];
@@ -97,7 +64,6 @@ function renderClassificationChart(dist) {
     };
 
     const total = Object.values(dist).reduce((a, b) => a + b, 0) || 1;
-
     const html = order.map(category => {
         const count = dist[category] || 0;
         const percent = ((count / total) * 100).toFixed(1);
@@ -120,9 +86,6 @@ function renderClassificationChart(dist) {
     container.innerHTML = html;
 }
 
-/**
- * Render variants in a table.
- */
 function renderVariantsTable(tableId, variants, maxRows) {
     const tbody = document.getElementById(tableId);
     if (!tbody) return;

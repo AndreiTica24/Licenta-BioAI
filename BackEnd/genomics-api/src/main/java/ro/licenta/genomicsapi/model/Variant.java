@@ -3,65 +3,36 @@ package ro.licenta.genomicsapi.model;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Variant — reprezintă o variantă genomică completă cu predicție AI
- * și anotare VEP/ClinVar.
- *
- * Câmpurile principale (din modelul AI):
- *   - chrom, pos, ref, alt — coordonatele variantei
- *   - predictedClass — Ref/Het/Hom-Alt din CNN
- *   - confidence — încrederea modelului (0-1)
- *
- * Câmpuri din anotarea VEP:
- *   - geneSymbol — numele genei (ex: BRCA1)
- *   - consequence — efect (ex: missense_variant)
- *   - impact — HIGH/MODERATE/LOW/MODIFIER
- *   - sift, polyphen — predicții impact pe proteină
- *   - hgvsc, hgvsp — notație standard variantă
- *
- * Câmpuri din ClinVar:
- *   - clinSig — clasificare clinică (Pathogenic/Benign/VUS)
- *   - clinDisease — boala asociată
- *   - clinReviewStatus — nivel de încredere ClinVar
- */
 public class Variant {
 
-    // ===== Coordonate (din predicția AI) =====
     private String chrom;
     private int pos;
     private String ref;
     private String alt;
 
-    // ===== Predicție model CNN =====
-    private String predictedClass;   // Ref / Het / Hom-Alt
+    private String predictedClass;
     private double confidence;
     private int depth;
     private double af;
 
-    // ===== Anotare VEP =====
-    private String geneSymbol;       // ex: BRCA1
-    private String geneId;            // ex: ENSG00000012048
-    private String consequence;       // ex: missense_variant
-    private String impact;            // HIGH | MODERATE | LOW | MODIFIER
-    private String biotype;           // protein_coding, etc.
-    private String hgvsc;             // ex: NM_007294.4:c.181T>G
-    private String hgvsp;             // ex: NP_009225.1:p.Cys61Gly
-    private String sift;              // ex: deleterious(0.01)
-    private String polyphen;          // ex: probably_damaging(0.987)
+    private String geneSymbol;
+    private String geneId;
+    private String consequence;
+    private String impact;
+    private String biotype;
+    private String hgvsc;
+    private String hgvsp;
+    private String sift;
+    private String polyphen;
 
-    // ===== ClinVar =====
-    private String clinSig;           // Pathogenic | Benign | VUS | ...
-    private String clinDisease;       // Boala asociată
-    private String clinReviewStatus;  // criteria_provided,multiple_submitters,...
+    private String clinSig;
+    private String clinDisease;
+    private String clinReviewStatus;
 
-    // ===== Clasificare finală (calculată) =====
-    private String finalClassification; // PATHOGENIC | LIKELY_PATHOGENIC | VUS | LIKELY_BENIGN | BENIGN | UNKNOWN
+    private String finalClassification;
 
-    // ===== Constructor =====
     public Variant() {
     }
-
-    // ===== Getters & Setters =====
 
     public String getChrom() { return chrom; }
     public void setChrom(String chrom) { this.chrom = chrom; }

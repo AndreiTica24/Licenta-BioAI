@@ -12,16 +12,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * PythonApiClient — comunică cu serviciul Python AI (FastAPI).
- *
- * Endpoint-uri apelate:
- *   POST /predict           — pornește un job, returnează job_id
- *   GET  /jobs/{id}         — status job
- *   GET  /jobs/{id}/result  — rezultat (VCF/JSON)
- *
- * Autentificare: header X-API-Key cu cheia din application.properties.
- */
+
 @Service
 public class PythonApiClient {
 
@@ -37,7 +28,6 @@ public class PythonApiClient {
 
         this.apiKey = apiKey;
 
-        // WebClient cu buffer mărit pentru răspunsuri mari (JSON cu mii de variante)
         this.webClient = WebClient.builder()
                 .baseUrl(pythonApiUrl)
                 .codecs(configurer -> configurer
@@ -83,9 +73,6 @@ public class PythonApiClient {
         return jobId;
     }
 
-    /**
-     * Returnează statusul unui job.
-     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> getJobStatus(String jobId) {
         return webClient.get()
@@ -96,11 +83,6 @@ public class PythonApiClient {
                 .block();
     }
 
-    /**
-     * Returnează rezultatul JSON al unui job completat.
-     * Python returnează FileResponse cu content-type octet-stream,
-     * deci citim ca String și parsăm manual cu Jackson.
-     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> getJobResultJson(String jobId) {
         String rawJson = webClient.get()
@@ -123,9 +105,6 @@ public class PythonApiClient {
         }
     }
 
-    /**
-     * Returnează rezultatul VCF (ca text) al unui job completat.
-     */
     public String getJobResultVcf(String jobId) {
         return webClient.get()
                 .uri("/jobs/{jobId}/result?format=vcf", jobId)
@@ -135,9 +114,6 @@ public class PythonApiClient {
                 .block();
     }
 
-    /**
-     * Verifică starea serviciului Python (health check).
-     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> health() {
         return webClient.get()
