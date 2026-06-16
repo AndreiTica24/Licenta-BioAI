@@ -68,6 +68,12 @@ public class SecurityConfig {
                         // Variante: USER sau ADMIN
                         .requestMatchers("/api/variants/**").hasAnyRole("USER", "ADMIN")
 
+                        // Joburi: USER sau ADMIN (filtrat per user)
+                        .requestMatchers("/api/jobs/**").hasAnyRole("USER", "ADMIN")
+
+                        // Chatbot: USER sau ADMIN
+                        .requestMatchers("/api/chatbot/**").hasAnyRole("USER", "ADMIN")
+
                         // Restul necesită autentificare
                         .anyRequest().authenticated()
                 )

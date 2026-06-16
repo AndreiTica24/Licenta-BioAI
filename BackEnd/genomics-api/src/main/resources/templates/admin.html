@@ -67,10 +67,35 @@
         </table>
     </div>
 
+    <!-- ALL JOBS TABLE -->
+    <div class="card">
+        <h2 class="card-title">🧬 All Analysis Jobs</h2>
+        <p class="card-subtitle">All BAM analyses performed in the system, across all users.</p>
+
+        <table class="table">
+            <thead>
+            <tr>
+                <th>Job ID</th>
+                <th>User</th>
+                <th>BAM File</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Variants</th>
+                <th class="actions">Actions</th>
+            </tr>
+            </thead>
+            <tbody id="jobs-table-body">
+            <tr><td colspan="7" style="text-align:center; padding:24px;
+                                            color:var(--text-muted);">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
 </div>
 
 <script src="/js/auth.js"></script>
 <script src="/js/api.js"></script>
+<script src="/js/chatbot.js"></script>
 <script>
     requireAdmin();
     renderUserInfo();
@@ -87,6 +112,10 @@
             // Load users
             const users = await apiGet('/api/admin/users');
             renderUsers(users);
+
+            // Load all jobs in system
+            const jobs = await apiGet('/api/jobs/all');
+            renderAllJobs(jobs);
         } catch (e) {
             const errorBox = document.getElementById('admin-error');
             errorBox.textContent = e.message;
@@ -134,6 +163,44 @@
         tbody.innerHTML = rows;
     }
 
+    function renderAllJobs(jobs) {
+        const tbody = document.getElementById('jobs-table-body');
+        if (!tbody) return;
+
+        if (jobs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">No jobs yet.</td></tr>';
+            return;
+        }
+
+        const rows = jobs.map(job => {
+            const statusBadge = `<span class="badge badge-status-${job.status.toLowerCase()}">${job.status}</span>`;
+            const variants = job.nVariants ? job.nVariants.toLocaleString() : '-';
+            const filename = job.bamFilename || '-';
+
+            let actions = '-';
+            if (job.status === 'COMPLETED') {
+                actions = `<a href="/result/${job.id}" class="btn btn-primary" style="padding:6px 12px; font-size:13px;">📊 View</a>
+                           <button onclick="deleteJobAdmin('${job.id}')" class="btn btn-danger" style="padding:6px 12px; font-size:13px; margin-left:6px;">🗑️</button>`;
+            } else {
+                actions = `<button onclick="deleteJobAdmin('${job.id}')" class="btn btn-danger" style="padding:6px 12px; font-size:13px;">🗑️</button>`;
+            }
+
+            return `
+                <tr>
+                    <td><code style="font-size:12px;">${job.id.substring(0, 8)}...</code></td>
+                    <td style="font-size:13px;"><strong>${job.userFullName || '?'}</strong><br><small style="color:var(--text-muted);">${job.userEmail || '?'}</small></td>
+                    <td style="font-size:13px;">${filename}</td>
+                    <td>${statusBadge}</td>
+                    <td><small>${formatDate(job.createdAt)}</small></td>
+                    <td>${variants}</td>
+                    <td class="actions">${actions}</td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.innerHTML = rows;
+    }
+
     async function deleteUser(id, email) {
         if (!confirm(`Are you sure you want to delete user "${email}"? This action cannot be undone.`)) {
             return;
@@ -141,6 +208,18 @@
         try {
             await apiDelete(`/api/admin/users/${id}`);
             alert('User deleted successfully');
+            loadAdminPanel();
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    async function deleteJobAdmin(jobId) {
+        if (!confirm('Delete this analysis job? This cannot be undone.')) {
+            return;
+        }
+        try {
+            await apiDelete('/api/jobs/' + jobId);
             loadAdminPanel();
         } catch (e) {
             alert('Error: ' + e.message);

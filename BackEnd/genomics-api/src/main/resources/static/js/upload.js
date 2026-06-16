@@ -1,6 +1,13 @@
+/* ============================================================================
+   upload.js — BAM upload + job polling
+   ============================================================================ */
+
 let currentJobId = null;
 let pollingInterval = null;
 
+/**
+ * Initialize upload area with click + drag-and-drop.
+ */
 function initUploadArea() {
     const uploadArea = document.getElementById('upload-area');
     const fileInput = document.getElementById('file-input');
@@ -30,6 +37,9 @@ function initUploadArea() {
     fileInput.addEventListener('change', handleFileSelection);
 }
 
+/**
+ * Display selected file info.
+ */
 function handleFileSelection() {
     const fileInput = document.getElementById('file-input');
     const fileInfo = document.getElementById('file-info');
@@ -55,6 +65,9 @@ function handleFileSelection() {
     uploadButton.disabled = false;
 }
 
+/**
+ * Handle upload form submission.
+ */
 async function handleUploadSubmit(event) {
     event.preventDefault();
 
@@ -101,6 +114,10 @@ async function handleUploadSubmit(event) {
     }
 }
 
+/**
+ * Poll job status every 5 seconds until completion.
+ * Also refreshes the jobs table.
+ */
 function startPollingStatus(jobId) {
     if (pollingInterval) {
         clearInterval(pollingInterval);
@@ -111,10 +128,12 @@ function startPollingStatus(jobId) {
             const status = await apiGet(`/api/variants/status/${jobId}`);
             updateProgressDisplay(status);
 
+            // Refresh jobs list to sync UI with DB
+            await loadJobs();
+
             if (status.status === 'completed' || status.status === 'failed') {
                 clearInterval(pollingInterval);
                 pollingInterval = null;
-                await loadJobs();  // Refresh list
 
                 if (status.status === 'completed') {
                     document.getElementById('progress-text').innerHTML =
@@ -132,6 +151,9 @@ function startPollingStatus(jobId) {
     }, 5000);
 }
 
+/**
+ * Update progress display based on job status.
+ */
 function updateProgressDisplay(status) {
     const progressText = document.getElementById('progress-text');
     const progressBar = document.getElementById('progress-bar');
@@ -147,52 +169,67 @@ function updateProgressDisplay(status) {
     }
 }
 
+/**
+ * Load all jobs from backend DB (persistent across restarts).
+ */
 async function loadJobs() {
     const jobsTable = document.getElementById('jobs-table-body');
     if (!jobsTable) return;
 
-    const auth = getAuth();
-    const jobsKey = `genomics_jobs_${auth.email}`;
-    let jobIds = JSON.parse(localStorage.getItem(jobsKey) || '[]');
+    try {
+        const jobs = await apiGet('/api/jobs/my');
 
-    if (currentJobId && !jobIds.includes(currentJobId)) {
-        jobIds.unshift(currentJobId);
-        localStorage.setItem(jobsKey, JSON.stringify(jobIds));
-    }
-
-    if (jobIds.length === 0) {
-        jobsTable.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:24px; color:var(--text-muted);">No analyses yet. Upload a BAM file to start.</td></tr>';
-        return;
-    }
-
-    const rows = [];
-    for (const jobId of jobIds) {
-        try {
-            const status = await apiGet(`/api/variants/status/${jobId}`);
-            rows.push(renderJobRow(status));
-        } catch (e) {
-            // Job not found in Python (server restarted) — skip
-            rows.push(`<tr><td colspan="5" style="color:var(--text-muted)">Job ${jobId.substring(0,8)}... unavailable</td></tr>`);
+        if (jobs.length === 0) {
+            jobsTable.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">No analyses yet. Upload a BAM file to start.</td></tr>';
+            return;
         }
-    }
 
-    jobsTable.innerHTML = rows.join('');
+        const rows = jobs.map(job => renderJobRow(job));
+        jobsTable.innerHTML = rows.join('');
+    } catch (e) {
+        console.error('Error loading jobs:', e);
+        jobsTable.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--danger);">Error loading jobs: ' + e.message + '</td></tr>';
+    }
 }
 
+/**
+ * Render one job row in the table.
+ */
 function renderJobRow(job) {
-    const statusBadge = `<span class="badge badge-status-${job.status}">${job.status}</span>`;
-    const variants = job.n_variants ? `${job.n_variants.toLocaleString()}` : '-';
-    const actions = job.status === 'completed'
-        ? `<a href="/result/${job.job_id}" class="btn btn-primary" style="padding:6px 12px; font-size:13px;">View Report</a>`
-        : '-';
+    const statusBadge = `<span class="badge badge-status-${job.status.toLowerCase()}">${job.status}</span>`;
+    const variants = job.nVariants ? `${job.nVariants.toLocaleString()}` : '-';
+    const filename = job.bamFilename || '-';
+    let actions = '-';
+
+    if (job.status === 'COMPLETED') {
+        actions = `<a href="/result/${job.id}" class="btn btn-primary" style="padding:6px 12px; font-size:13px;">📊 Analyze</a>
+                   <button onclick="deleteJob('${job.id}')" class="btn btn-secondary" style="padding:6px 12px; font-size:13px; margin-left:6px;">🗑️</button>`;
+    } else if (job.status === 'PROCESSING') {
+        actions = `<span style="color:var(--info);"><span class="loader" style="width:14px;height:14px;"></span> Processing...</span>`;
+    } else {
+        actions = `<button onclick="deleteJob('${job.id}')" class="btn btn-secondary" style="padding:6px 12px; font-size:13px;">🗑️</button>`;
+    }
 
     return `
         <tr>
-            <td><code style="font-size:12px;">${job.job_id.substring(0, 8)}...</code></td>
+            <td><code style="font-size:12px;">${job.id.substring(0, 8)}...</code></td>
+            <td style="font-size:13px;">${filename}</td>
             <td>${statusBadge}</td>
-            <td>${formatDate(job.created_at)}</td>
+            <td>${formatDate(job.createdAt)}</td>
             <td>${variants}</td>
             <td class="actions">${actions}</td>
         </tr>
     `;
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Delete this analysis from history? This cannot be undone.')) {
+        return;
+    }
+    try {
+        await apiDelete('/api/jobs/' + jobId);
+        await loadJobs();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
 }
