@@ -19,25 +19,12 @@ import torch.nn.functional as F
 
 
 class VariantCallerCNN1D(nn.Module):
-    """
-    CNN 1D cu 3 blocuri convoluționale + clasificator MLP.
-
-    Arhitectură:
-      Block 1: Conv1D(6→64,  kernel=11) → BN → ReLU → MaxPool(2)  → (64, 100)
-      Block 2: Conv1D(64→128, kernel=7)  → BN → ReLU → MaxPool(2)  → (128, 50)
-      Block 3: Conv1D(128→256, kernel=5) → BN → ReLU → MaxPool(2)  → (256, 25)
-      Head   : GlobalAvgPool → FC(256→128) → Dropout → FC(128→3)
-
-    Parametri ~200K — eficient pentru semnalul nostru.
-    """
-
     def __init__(self,
                  in_channels: int = 10,
                  num_classes: int = 3,
                  dropout:     float = 0.3):
         super().__init__()
 
-        # Block 1: detectează motive scurte (kernel mare = 11 nucleotide)
         self.block1 = nn.Sequential(
             nn.Conv1d(in_channels, 64, kernel_size=11, padding=5, bias=False),
             nn.BatchNorm1d(64),
@@ -48,7 +35,6 @@ class VariantCallerCNN1D(nn.Module):
             nn.MaxPool1d(2),
         )
 
-        # Block 2: combină motive în pattern-uri mai mari
         self.block2 = nn.Sequential(
             nn.Conv1d(64, 128, kernel_size=7, padding=3, bias=False),
             nn.BatchNorm1d(128),
@@ -59,7 +45,6 @@ class VariantCallerCNN1D(nn.Module):
             nn.MaxPool1d(2),
         )
 
-        # Block 3: features de înaltă-nivel
         self.block3 = nn.Sequential(
             nn.Conv1d(128, 256, kernel_size=5, padding=2, bias=False),
             nn.BatchNorm1d(256),
@@ -70,7 +55,6 @@ class VariantCallerCNN1D(nn.Module):
             nn.MaxPool1d(2),
         )
 
-        # Global pooling + clasificator
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.classifier  = nn.Sequential(
             nn.Flatten(),

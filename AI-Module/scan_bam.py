@@ -71,26 +71,9 @@ HUMAN_CHROMOSOMES = (
     [str(i) for i in range(1, 23)] + ["X", "Y"]
 )
 
-
-# ============================================================================
-# Pre-filtrare la nivel de cromozom (rulează în paralel)
-# ============================================================================
-
 def scan_chromosome(args: Tuple[str, str, str]) -> Tuple[str, List[Dict], int]:
-    """
-    Scanează un singur cromozom și returnează lista de candidați.
 
-    Argumente:
-        bam_path : calea către BAM
-        chrom    : numele cromozomului (ex: 'chr1' sau '1')
-
-    Returneaza:
-        chrom    : numele cromozomului
-        candidates: lista de dict cu {chrom, pos, ref_base, depth, alt_count, AF}
-        n_positions_scanned : numărul total de poziții scanate
-    """
     bam_path, chrom, fasta_path = args
-
     candidates = []
     n_scanned = 0
 
@@ -98,7 +81,6 @@ def scan_chromosome(args: Tuple[str, str, str]) -> Tuple[str, List[Dict], int]:
         bam = pysam.AlignmentFile(bam_path, "rb")
         fasta = pysam.FastaFile(fasta_path) if fasta_path else None
 
-        # Verificăm că cromozomul există în BAM
         bam_refs = set(bam.references)
         if chrom not in bam_refs:
             bam.close()
@@ -106,7 +88,6 @@ def scan_chromosome(args: Tuple[str, str, str]) -> Tuple[str, List[Dict], int]:
                 fasta.close()
             return chrom, [], 0
 
-        # Pentru FASTA, normalizăm numele cromozomului (poate avea sau nu 'chr')
         fasta_chrom = chrom
         if fasta is not None:
             fasta_refs = set(fasta.references)
@@ -118,19 +99,11 @@ def scan_chromosome(args: Tuple[str, str, str]) -> Tuple[str, List[Dict], int]:
                 else:
                     fasta = None  # FASTA nu are acest cromozom
 
-        # ───────────────────────────────────────────────────────────────────
-        # Pileup pe întregul cromozom
-        # ───────────────────────────────────────────────────────────────────
-        for col in bam.pileup(chrom,
-                              min_base_quality=MIN_BASE_QUAL,
-                              min_mapping_quality=MIN_MAPPING_QUAL,
-                              stepper="all",
-                              ignore_overlaps=False):
+        for col in bam.pileup(chrom,min_base_quality=MIN_BASE_QUAL,min_mapping_quality=MIN_MAPPING_QUAL,stepper="all",ignore_overlaps=False):
 
             n_scanned += 1
             pos = col.reference_pos
 
-            # Numărăm bazele observate
             base_counts = {'A': 0, 'C': 0, 'G': 0, 'T': 0}
             depth = 0
 
@@ -149,32 +122,25 @@ def scan_chromosome(args: Tuple[str, str, str]) -> Tuple[str, List[Dict], int]:
                 except (IndexError, TypeError):
                     continue
 
-            # FILTRU 1: depth minim
             if depth < MIN_DEPTH:
                 continue
 
-            # Determinăm baza de referință
             if fasta is not None:
                 try:
                     ref_base = fasta.fetch(fasta_chrom, pos, pos + 1).upper()
                     if ref_base not in VALID_BASES:
                         continue
                 except (ValueError, KeyError):
-                    # Fallback: baza majoritară din BAM
                     ref_base = max(base_counts, key=base_counts.get)
             else:
-                # Fallback: baza majoritară (presupunem că majoritatea reads = ref)
                 ref_base = max(base_counts, key=base_counts.get)
 
-            # Calculăm AF (procent reads cu baza alternativă)
             alt_count = depth - base_counts[ref_base]
             af = alt_count / depth
 
-            # FILTRU 2: AF minim
             if af < MIN_AF:
                 continue
 
-            # Poziție candidat — o salvăm
             candidates.append({
                 "chrom":     chrom,
                 "pos":       pos,
@@ -198,28 +164,11 @@ def scan_chromosome(args: Tuple[str, str, str]) -> Tuple[str, List[Dict], int]:
 # Pipeline principal
 # ============================================================================
 
-def scan_bam(bam_path: str,
-             output_path: str,
-             fasta_path: str = None,
-             threads: int = 4,
-             chromosomes: List[str] = None) -> Dict:
-    """
-    Scanează un BAM complet și salvează candidații într-un TSV.
+def scan_bam(bam_path: str, output_path: str, fasta_path: str = None, threads: int = 4, chromosomes: List[str] = None) -> Dict:
 
-    Argumente:
-        bam_path    : calea către BAM
-        output_path : calea de output (TSV)
-        fasta_path  : (opțional) FASTA pentru baza de referință
-        threads     : numărul de procese paralele
-        chromosomes : (opțional) listă explicită de cromozomi de scanat
-
-    Returneaza:
-        dict cu statistici (n_candidates, n_scanned, time_seconds)
-    """
     bam_path    = str(bam_path)
     output_path = str(output_path)
 
-    # Verificări preliminare
     if not os.path.exists(bam_path):
         raise FileNotFoundError(f"BAM nu există: {bam_path}")
 
@@ -233,15 +182,12 @@ def scan_bam(bam_path: str,
         logger.warning(f"FASTA nu există: {fasta_path}, baza ref va fi inferată")
         fasta_path = None
 
-    # Detectăm cromozomii din BAM
     bam = pysam.AlignmentFile(bam_path, "rb")
     all_refs = list(bam.references)
     bam.close()
 
     if chromosomes is None:
-        # Selectăm doar cromozomii umani standard (1-22, X, Y)
         chromosomes = [c for c in all_refs if c in HUMAN_CHROMOSOMES]
-        # Sortăm: 1-22, apoi X, Y
         def chr_sort_key(c):
             c_clean = c.replace("chr", "")
             if c_clean == "X":  return 23
@@ -271,7 +217,6 @@ def scan_bam(bam_path: str,
     total_scanned = 0
     per_chrom_stats = []
 
-    # Pregătim argumentele pentru procese
     args_list = [(bam_path, chrom, fasta_path) for chrom in chromosomes]
 
     if threads > 1:
@@ -312,9 +257,6 @@ def scan_bam(bam_path: str,
 
     elapsed = time.time() - t0
 
-    # ───────────────────────────────────────────────────────────────────────
-    # Salvăm rezultatele
-    # ───────────────────────────────────────────────────────────────────────
     print()
     print("=" * 70)
     print(f"💾 Salvăm {len(all_candidates):,} candidați în {output_path}")
@@ -340,9 +282,6 @@ def scan_bam(bam_path: str,
             f.write(f"{c['chrom']}\t{c['pos']}\t{c['ref_base']}\t"
                     f"{c['depth']}\t{c['alt_count']}\t{c['AF']}\n")
 
-    # ───────────────────────────────────────────────────────────────────────
-    # Statistici finale
-    # ───────────────────────────────────────────────────────────────────────
     print()
     print("=" * 70)
     print("📊 STATISTICI FINALE")
