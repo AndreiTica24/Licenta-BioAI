@@ -1,0 +1,32 @@
+# ============================================================
+# GenomicsAI - Module AI Dependencies
+# Python 3.10 sau 3.11
+# ============================================================
+
+# PyTorch (cu suport CUDA 12.x)
+# Pentru instalare cu GPU CUDA 12.4:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+# Pentru CPU-only:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.5.0
+
+# Bioinformatică
+pysam>=0.22.0
+cyvcf2>=0.30.0
+
+# Machine Learning
+numpy>=1.26.0
+pandas>=2.0.0
+scikit-learn>=1.5.0
+scipy>=1.14.0
+xgboost>=2.0.0
+
+# API Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+
+# Utilitare
+Jinja2>=3.1.0
+joblib>=1.4.0
+python-dateutil>=2.9.0
