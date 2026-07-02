@@ -63,14 +63,20 @@ cd Licenta-BioAI
 cd AI-Module
 
 # Creare mediu conda
-conda create -n ai-genomics python=3.11
+conda create -n ai-genomics python=3.11 -y
 conda activate ai-genomics
+
+# Instalare PyTorch cu suport CUDA 12.4 (dacă ai GPU NVIDIA)
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+# Sau varianta CPU-only (pentru testare fără GPU)
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # Instalare dependințe
 pip install -r requirements.txt
 
 # Verificare GPU (opțional)
-python -c "import torch; print(torch.cuda.is_available())"
+python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 ```
 
 **Descarcă modelul antrenat:**
