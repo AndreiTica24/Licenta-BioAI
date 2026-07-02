@@ -37,15 +37,15 @@ function renderReport(data, jobId) {
         v.finalClassification === 'PATHOGENIC' ||
         v.finalClassification === 'LIKELY_PATHOGENIC'
     );
-    renderVariantsTable('important-variants', importantVariants, 50);
+    renderVariantsTable('important-variants', importantVariants, 1000);
     const vusVariants = data.variants.filter(v =>
         v.finalClassification === 'VUS'
     );
-    renderVariantsTable('vus-variants', vusVariants, 50);
+    renderVariantsTable('vus-variants', vusVariants, 2000);
     const allWithGene = data.variants.filter(v =>
         v.geneSymbol && v.geneSymbol.length > 0
     );
-    renderVariantsTable('all-variants', allWithGene, 100);
+    renderVariantsTable('all-variants', allWithGene, 500);
     document.getElementById('count-important').textContent = importantVariants.length;
     document.getElementById('count-vus').textContent = vusVariants.length;
     document.getElementById('count-all').textContent = allWithGene.length;

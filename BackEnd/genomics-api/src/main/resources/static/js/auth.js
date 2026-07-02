@@ -4,10 +4,6 @@
 
 const AUTH_KEY = 'genomics_auth';
 
-/**
- * Get current logged-in user info from localStorage.
- * Returns null if not logged in or token expired.
- */
 function getAuth() {
     const raw = localStorage.getItem(AUTH_KEY);
     if (!raw) return null;
@@ -24,9 +20,6 @@ function getAuth() {
     }
 }
 
-/**
- * Store auth response in localStorage.
- */
 function setAuth(authResponse) {
     const data = {
         token: authResponse.token,
@@ -38,18 +31,11 @@ function setAuth(authResponse) {
     localStorage.setItem(AUTH_KEY, JSON.stringify(data));
 }
 
-/**
- * Logout — clear token and redirect to login.
- */
 function logout() {
     localStorage.removeItem(AUTH_KEY);
     window.location.href = '/login';
 }
 
-/**
- * Require auth — redirect to /login if not authenticated.
- * Call this at the top of protected pages.
- */
 function requireAuth() {
     const auth = getAuth();
     if (!auth) {
@@ -59,9 +45,6 @@ function requireAuth() {
     return auth;
 }
 
-/**
- * Require admin role — redirect to dashboard if not admin.
- */
 function requireAdmin() {
     const auth = requireAuth();
     if (!auth) return null;
@@ -72,9 +55,6 @@ function requireAdmin() {
     return auth;
 }
 
-/**
- * Login form handler.
- */
 async function handleLogin(event) {
     event.preventDefault();
     const form = event.target;

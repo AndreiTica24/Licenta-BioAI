@@ -135,7 +135,6 @@ public class ChatbotService {
      * Trimite întrebarea către Ollama și returnează răspunsul.
      */
     public String ask(String question) {
-        // Layer 1: validare keyword
         if (!isInDomain(question)) {
             log.info("Întrebare în afara domeniului: {}", question);
             return "I can only help with questions about genetics and variant interpretation. " +
@@ -144,15 +143,13 @@ public class ChatbotService {
         }
 
         log.info("Întrebare validă, trimit la Ollama: {}", question);
-
-        // Layer 2: prompt restrictiv
         Map<String, Object> request = new HashMap<>();
         request.put("model", model);
         request.put("prompt", SYSTEM_PROMPT + "\n\nUser question: " + question);
         request.put("stream", false);
         Map<String, Object> options = new HashMap<>();
-        options.put("temperature", 0.3);     // răspunsuri factuale, nu creative
-        options.put("num_predict", 500);     // limitare lungime răspuns
+        options.put("temperature", 0.3);
+        options.put("num_predict", 500);
         request.put("options", options);
 
         try {
