@@ -197,5 +197,5 @@ Cod dezvoltat în scop academic pentru lucrarea de licență. Nu este certificat
 
 ## Contact
 
-Andrei Tica — [email institutional]
+Andrei Tica — andrei.tica@student.upt.ro
 
